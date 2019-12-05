@@ -173,7 +173,7 @@ public final class PolyglotPlugin extends AbstractPrimitiveFactoryHolder {
             try {
                 final boolean mimeType = isMimeType(languageIdOrMimeType);
                 final String lang = mimeType ? findLanguageByMimeType(image.env, languageIdOrMimeType) : languageIdOrMimeType;
-                SourceBuilder newBuilder = Source.newBuilder(lang, image.env.getTruffleFile(pathString));
+                SourceBuilder newBuilder = Source.newBuilder(lang, image.env.getPublicTruffleFile(pathString));
                 if (mimeType) {
                     newBuilder = newBuilder.mimeType(languageIdOrMimeType);
                 }
@@ -224,7 +224,7 @@ public final class PolyglotPlugin extends AbstractPrimitiveFactoryHolder {
             Files.write(Paths.get(cFile), foreignCode.getBytes());
             final Process p = Runtime.getRuntime().exec("clang -O1 -c -emit-llvm -o " + llvmFile + " " + cFile);
             p.waitFor();
-            return Source.newBuilder("llvm", method.image.env.getTruffleFile(llvmFile)).build();
+            return Source.newBuilder("llvm", method.image.env.getPublicTruffleFile(llvmFile)).build();
         }
     }
 
@@ -340,8 +340,7 @@ public final class PolyglotPlugin extends AbstractPrimitiveFactoryHolder {
             super(method);
         }
 
-        @Specialization
-        @TruffleBoundary
+        @Specialization(guards = "method.image.env.isPolyglotBindingsAccessAllowed()")
         protected final Object doGet(@SuppressWarnings("unused") final Object receiver) {
             return method.image.env.getPolyglotBindings();
         }
@@ -763,14 +762,10 @@ public final class PolyglotPlugin extends AbstractPrimitiveFactoryHolder {
         @Specialization(guards = {"lib.isArrayElementReadable(object, to0(index))"}, limit = "2")
         protected static final Object doReadArrayElement(@SuppressWarnings("unused") final Object receiver, final Object object, final long index,
                         @Cached final WrapToSqueakNode wrapNode,
-                        @CachedLibrary("object") final InteropLibrary lib,
-                        @Cached final BranchProfile errorProfile) {
+                        @CachedLibrary("object") final InteropLibrary lib) {
             try {
                 return wrapNode.executeWrap(lib.readArrayElement(object, index - 1));
-            } catch (final InvalidArrayIndexException e) {
-                errorProfile.enter();
-                throw primitiveFailedCapturing(e);
-            } catch (final UnsupportedMessageException e) {
+            } catch (final UnsupportedMessageException | InvalidArrayIndexException e) {
                 throw SqueakException.illegalState(e);
             }
         }
@@ -785,15 +780,11 @@ public final class PolyglotPlugin extends AbstractPrimitiveFactoryHolder {
 
         @Specialization(guards = {"lib.isArrayElementRemovable(object, to0(index))"}, limit = "2")
         protected static final Object doRemoveArrayElement(@SuppressWarnings("unused") final Object receiver, final Object object, final long index,
-                        @CachedLibrary("object") final InteropLibrary lib,
-                        @Cached final BranchProfile errorProfile) {
+                        @CachedLibrary("object") final InteropLibrary lib) {
             try {
                 lib.removeArrayElement(object, index - 1);
                 return object;
-            } catch (final InvalidArrayIndexException e) {
-                errorProfile.enter();
-                throw primitiveFailedCapturing(e);
-            } catch (final UnsupportedMessageException e) {
+            } catch (final UnsupportedMessageException | InvalidArrayIndexException e) {
                 throw SqueakException.illegalState(e);
             }
         }
@@ -1140,7 +1131,7 @@ public final class PolyglotPlugin extends AbstractPrimitiveFactoryHolder {
                         @Cached final BranchProfile errorProfile) {
             final String path = value.asStringUnsafe();
             try {
-                image.env.addToHostClassPath(image.env.getTruffleFile(path));
+                image.env.addToHostClassPath(image.env.getPublicTruffleFile(path));
                 return receiver;
             } catch (final SecurityException e) {
                 errorProfile.enter();
