@@ -57,10 +57,11 @@ download-graalvm-ce() {
 download-openjdk8-jvmci() {
   local target_dir=$1
   local jdk_tar=${target_dir}/jdk.tar.gz
+  local jdk_url=https://github.com/graalvm/openjdk8-jvmci-builder/releases/download/${DEP_JVMCI}/openjdk-8u${DEP_JDK8UPDATE}-${DEP_JVMCI}-${OS_NAME}-amd64.tar.gz
 
   pushd "${target_dir}" > /dev/null
 
-  curl -sSL --retry 3 -o ${jdk_tar} https://github.com/graalvm/openjdk8-jvmci-builder/releases/download/${DEP_JVMCI}/openjdk-8u${DEP_JDK8UPDATE}-${DEP_JVMCI}-${OS_NAME}-amd64.tar.gz
+  curl -sSL --retry 3 -o ${jdk_tar} ${jdk_url}
   tar xzf ${jdk_tar}
   echo "$(pwd)/openjdk1.8.0_${DEP_JDK8UPDATE}-${DEP_JVMCI}${JAVA_HOME_SUFFIX}"
 

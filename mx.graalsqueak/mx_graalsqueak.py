@@ -503,8 +503,8 @@ mx_sdk.register_graalvm_component(mx_sdk.GraalVmLanguage(
             destination='bin/<exe:graalsqueak>',
             jar_distributions=['graalsqueak:GRAALSQUEAK_LAUNCHER'],
             main_class='%s.launcher.GraalSqueakLauncher' % PACKAGE_NAME,
-            extra_jvm_args=BASE_VM_ARGS,
-            build_args=[
+            #extra_jvm_args=BASE_VM_ARGS,
+            build_args=BASE_VM_ARGS+[
                 # '--pgo-instrument',  # (uncomment to enable profiling)
                 # '--pgo',  # (uncomment to recompile with profiling info)
             ],
