@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -35,7 +35,7 @@ public abstract class ResumeProcessNode extends AbstractNodeWithCode {
     @Specialization(guards = "hasHigherPriority(newProcess)")
     protected final void doTransferTo(final VirtualFrame frame, final PointersObject newProcess,
                     @Cached final AbstractPointersObjectWriteNode pointersWriteNode,
-                    @Cached("create(code)") final GetOrCreateContextNode contextNode) {
+                    @Cached("create(code, true)") final GetOrCreateContextNode contextNode) {
         putToSleepNode.executePutToSleep(code.image.getActiveProcess(pointersReadNode));
         contextNode.executeGet(frame).transferTo(pointersReadNode, pointersWriteNode, newProcess);
     }

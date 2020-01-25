@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -106,8 +106,7 @@ public class AbstractPointersObjectNodes {
         }
 
         @SuppressWarnings("unused")
-        @Specialization(guards = {"cachedIndex == index", "object.getLayout() == cachedLayout",
-                        "!cachedLocation.isUninitialized()", "cachedLocation.canStore(value)"}, //
+        @Specialization(guards = {"cachedIndex == index", "object.getLayout() == cachedLayout", "cachedLocation.canStore(value)"}, //
                         assumptions = "cachedLayout.getValidAssumption()", limit = "CACHE_LIMIT")
         protected static final void doWriteCached(final AbstractPointersObject object, final int index,
                         final Object value,
@@ -123,7 +122,7 @@ public class AbstractPointersObjectNodes {
         }
 
         @SuppressWarnings("unused")
-        @Specialization(guards = {"cachedIndex == index", "object.getLayout() == oldLayout", "oldLocation.isUninitialized()"}, //
+        @Specialization(guards = {"cachedIndex == index", "object.getLayout() == oldLayout", "!oldLocation.canStore(value)"}, //
                         assumptions = {"oldLayout.getValidAssumption()", "newLayout.getValidAssumption()"}, limit = "CACHE_LIMIT")
         protected static final void doWriteCachedUninitialized(final AbstractPointersObject object, final int index, final Object value,
                         @Cached("index") final int cachedIndex,

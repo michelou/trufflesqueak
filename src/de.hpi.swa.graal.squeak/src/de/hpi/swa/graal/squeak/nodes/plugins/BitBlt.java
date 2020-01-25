@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -9,7 +9,6 @@ import java.util.function.LongBinaryOperator;
 
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
-import com.oracle.truffle.api.nodes.ExplodeLoop;
 
 import de.hpi.swa.graal.squeak.exceptions.PrimitiveExceptions.PrimitiveFailed;
 import de.hpi.swa.graal.squeak.exceptions.SqueakExceptions.SqueakException;
@@ -242,7 +241,6 @@ public final class BitBlt {
      */
 
     /* BitBltSimulation>>#alphaBlendConst:with:paintMode: */
-    @ExplodeLoop
     private long alphaBlendConstwithpaintMode(final long sourceWord, final long destinationWord, final boolean paintMode) {
         final long bitsPerColor;
         long blend;
@@ -942,6 +940,8 @@ public final class BitBlt {
         final LongBinaryOperator mergeFnwith = opTable[combinationRule + 1];
         assert mergeFnwith != null : "Unexpected `null` value";
         assert !(preload && skew == 0);
+        assert -32 <= skew && skew <= 32; // Modified (image uses 31 instead of 32).
+
         /* Byte delta */
         hInc = hDir * 4;
         if (skew < 0) {
@@ -1035,7 +1035,6 @@ public final class BitBlt {
                         /* we don't need more bits, they will all come from prevWord */
                         thisWord = 0;
                     } else {
-                        assert sourceIndex < endOfSource;
                         thisWord = srcLongAt(sourceIndex);
                     }
                     sourceIndex += hInc;
@@ -1096,7 +1095,6 @@ public final class BitBlt {
                         /* we don't need more bits, they will all come from prevWord */
                         thisWord = 0;
                     } else {
-                        assert sourceIndex < endOfSource;
                         thisWord = srcLongAt(sourceIndex);
                     }
                     sourceIndex += hInc;
@@ -2170,12 +2168,18 @@ public final class BitBlt {
         /* partition mask starts at the right */
         mask = MASK_TABLE[nBits];
         result = 0;
-        for (int i = 1; i <= nParts; i++) {
-            if ((word1 & mask) == mask) {
-                result = result | word2 & mask;
+        if (nBits == 32) {
+            if (word1 == mask) {
+                result = result | word2;
             }
-            /* slide left to next partition */
-            mask = shl(mask, nBits);
+        } else {
+            for (int i = 1; i <= nParts; i++) {
+                if ((word1 & mask) == mask) {
+                    result = result | word2 & mask;
+                }
+                /* slide left to next partition */
+                mask = shl(mask, nBits);
+            }
         }
         return result;
     }
@@ -2195,11 +2199,15 @@ public final class BitBlt {
 
         /* partition mask starts at the right */
         mask = MASK_TABLE[nBits];
-        result = 0;
-        for (int i = 1; i <= nParts; i++) {
-            result = result | Math.max(word2 & mask, word1 & mask);
-            /* slide left to next partition */
-            mask = shl(mask, nBits);
+        if (nBits == 32) {
+            result = Math.max(word1, word2);
+        } else {
+            result = 0;
+            for (int i = 1; i <= nParts; i++) {
+                result = result | Math.max(word2 & mask, word1 & mask);
+                /* slide left to next partition */
+                mask = shl(mask, nBits);
+            }
         }
         return result;
     }
@@ -2219,11 +2227,15 @@ public final class BitBlt {
 
         /* partition mask starts at the right */
         mask = MASK_TABLE[nBits];
-        result = 0;
-        for (int i = 1; i <= nParts; i++) {
-            result = result | Math.min(word2 & mask, word1 & mask);
-            /* slide left to next partition */
-            mask = shl(mask, nBits);
+        if (nBits == 32) {
+            result = Math.min(word1, word2);
+        } else {
+            result = 0;
+            for (int i = 1; i <= nParts; i++) {
+                result = result | Math.min(word2 & mask, word1 & mask);
+                /* slide left to next partition */
+                mask = shl(mask, nBits);
+            }
         }
         return result;
     }
@@ -2322,18 +2334,22 @@ public final class BitBlt {
 
         /* partition mask starts at the right */
         mask = MASK_TABLE[nBits];
-        result = 0;
-        for (int i = 1; i <= nParts; i++) {
-            p1 = word1 & mask;
-            p2 = word2 & mask;
-            if (p1 < p2) {
-                /* result is really abs value of thedifference */
-                result = result | p2 - p1;
-            } else {
-                result = result | p1 - p2;
+        if (nBits == 32) {
+            result = word1 < word2 ? word2 - word1 : word1 - word2;
+        } else {
+            result = 0;
+            for (int i = 1; i <= nParts; i++) {
+                p1 = word1 & mask;
+                p2 = word2 & mask;
+                if (p1 < p2) {
+                    /* result is really abs value of thedifference */
+                    result = result | p2 - p1;
+                } else {
+                    result = result | p1 - p2;
+                }
+                /* slide left to next partition */
+                mask = shl(mask, nBits);
             }
-            /* slide left to next partition */
-            mask = shl(mask, nBits);
         }
         return result;
     }
@@ -2544,10 +2560,15 @@ public final class BitBlt {
         if (!loadBitBltFromwarping(bbObj, false)) {
             PrimitiveFailed.andTransferToInterpreter();
         }
-        copyBits(factor);
-        assert !failed();
-        showDisplayBits();
-        assert !failed();
+        try {
+            copyBits(factor);
+            assert !failed();
+            showDisplayBits();
+            assert !failed();
+        } catch (final AssertionError e) {
+            bbObj.image.printToStdErr(e.getMessage());
+            PrimitiveFailed.andTransferToInterpreter();
+        }
         if (combinationRule == 22 || combinationRule == 32) {
             return bitCount;
         } else {

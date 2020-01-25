@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -13,7 +13,6 @@ import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CompilerAsserts;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
-import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.interop.ArityException;
 import com.oracle.truffle.api.interop.InteropLibrary;
@@ -100,14 +99,19 @@ public final class ClassObject extends AbstractSqueakObjectWithClassAndHash {
     }
 
     @Override
-    @TruffleBoundary
+    public String toString() {
+        return getClassName();
+    }
+
+    @Override
     public String getClassName() {
+        CompilerAsserts.neverPartOfCompilation();
         if (isAMetaClass()) {
-            final Object classInstance = pointers[METACLASS.THIS_CLASS];
+            final Object classInstance = pointers[CLASS_DESCRIPTION.SIZE - METACLASS.THIS_CLASS];
             if (classInstance != NilObject.SINGLETON) {
-                return "Metaclass (" + ((ClassObject) classInstance).getClassNameUnsafe() + ")";
+                return ((ClassObject) classInstance).getClassNameUnsafe() + " class";
             } else {
-                return "Metaclass (unknown)";
+                return "Unknown metaclass";
             }
         } else if (size() >= 11) {
             return getClassNameUnsafe();
@@ -223,7 +227,7 @@ public final class ClassObject extends AbstractSqueakObjectWithClassAndHash {
 
     /** ByteSymbol. */
     public boolean isSymbolClass() {
-        return this == image.aboutToReturnSelector.getSqueakClass();
+        return this == image.getByteSymbolClass();
     }
 
     /** WideString. */

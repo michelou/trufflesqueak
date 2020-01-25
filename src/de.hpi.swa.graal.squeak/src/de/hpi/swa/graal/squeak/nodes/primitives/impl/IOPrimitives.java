@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -8,7 +8,6 @@ package de.hpi.swa.graal.squeak.nodes.primitives.impl;
 import java.util.List;
 
 import com.oracle.truffle.api.CompilerDirectives;
-import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Cached.Shared;
 import com.oracle.truffle.api.dsl.Fallback;
@@ -16,7 +15,6 @@ import com.oracle.truffle.api.dsl.GenerateNodeFactory;
 import com.oracle.truffle.api.dsl.NodeFactory;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.VirtualFrame;
-import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeCost;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.profiles.BranchProfile;
@@ -74,26 +72,23 @@ public final class IOPrimitives extends AbstractPrimitiveFactoryHolder {
     @GenerateNodeFactory
     @SqueakPrimitive(indices = 91)
     protected abstract static class PrimTestDisplayDepthNode extends AbstractPrimitiveNode implements BinaryPrimitive {
-        // TODO: support all depths? {1, 2, 4, 8, 16, 32}
-        @CompilationFinal(dimensions = 1) private static final int[] SUPPORTED_DEPTHS = new int[]{32};
-
         protected PrimTestDisplayDepthNode(final CompiledMethodObject method) {
             super(method);
         }
 
-        @ExplodeLoop
-        @Specialization
+        @Specialization(guards = {"method.image.hasDisplay()"})
         protected static final boolean doTest(@SuppressWarnings("unused") final Object receiver, final long depth) {
-            for (int i = 0; i < SUPPORTED_DEPTHS.length; i++) {
-                if (SUPPORTED_DEPTHS[i] == depth) {
-                    return BooleanObject.TRUE;
-                }
-            }
-            return BooleanObject.FALSE;
+            // TODO: support all depths ({1, 2, 4, 8, 16, 32} and negative values)?
+            return BooleanObject.wrap(depth == 32);
+        }
+
+        @Specialization(guards = {"!method.image.hasDisplay()"})
+        protected static final boolean doTestHeadless(@SuppressWarnings("unused") final Object receiver, final long depth) {
+            return BooleanObject.wrap(depth % 2 == 0);
         }
     }
 
-    /* primitiveSetDisplayMode (#92) no longer in use, support dropped in GraalSqueak.. */
+    /* primitiveSetDisplayMode (#92) no longer in use, support dropped in GraalSqueak. */
 
     @GenerateNodeFactory
     @SqueakPrimitive(indices = 93)
@@ -484,17 +479,6 @@ public final class IOPrimitives extends AbstractPrimitiveFactoryHolder {
                             @Shared("errorProfile") @Cached final BranchProfile errorProfile) {
                 try {
                     System.arraycopy(repl.getDoubleStorage(), (int) replStart - 1, rcvr.getDoubleStorage(), (int) start - 1, (int) (1 + stop - start));
-                } catch (final IndexOutOfBoundsException e) {
-                    errorProfile.enter();
-                    throw PrimitiveFailed.BAD_INDEX;
-                }
-            }
-
-            @Specialization(guards = {"rcvr.isNativeObjectType()", "repl.isNativeObjectType()"})
-            protected static final void doArraysOfNatives(final ArrayObject rcvr, final long start, final long stop, final ArrayObject repl, final long replStart,
-                            @Shared("errorProfile") @Cached final BranchProfile errorProfile) {
-                try {
-                    System.arraycopy(repl.getNativeObjectStorage(), (int) replStart - 1, rcvr.getNativeObjectStorage(), (int) start - 1, (int) (1 + stop - start));
                 } catch (final IndexOutOfBoundsException e) {
                     errorProfile.enter();
                     throw PrimitiveFailed.BAD_INDEX;

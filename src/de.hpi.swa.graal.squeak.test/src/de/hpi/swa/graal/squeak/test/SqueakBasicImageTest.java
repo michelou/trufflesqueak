@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -57,8 +57,8 @@ public class SqueakBasicImageTest extends AbstractSqueakTestCaseWithImage {
     @Test
     public void test05OnError() {
         final Object result = compilerEvaluate("[[self error: 'foobar'] on: Error do: [:err| ^ err messageText]]value");
-        assertEquals("foobar", result.toString());
-        assertEquals("foobar", compilerEvaluate("[[self error: 'foobar'] value] on: Error do: [:err| ^ err messageText]").toString());
+        assertEquals("'foobar'", result.toString());
+        assertEquals("'foobar'", compilerEvaluate("[[self error: 'foobar'] value] on: Error do: [:err| ^ err messageText]").toString());
         assertEquals(BooleanObject.TRUE, compilerEvaluate("[[self error: 'foobar'] on: ZeroDivide do: [:e|]] on: Error do: [:err| ^ true]"));
         assertEquals(BooleanObject.TRUE, compilerEvaluate("[self error: 'foobar'. false] on: Error do: [:err| ^ err return: true]"));
     }
@@ -94,7 +94,7 @@ public class SqueakBasicImageTest extends AbstractSqueakTestCaseWithImage {
 
     @Test
     public void test10TinyBenchmarks() {
-        final String resultString = evaluate("1 tinyBenchmarks").toString();
+        final String resultString = context.eval(SqueakLanguageConfig.ID, "1 tinyBenchmarks").asString();
         assertTrue(resultString.contains("bytecodes/sec"));
         assertTrue(resultString.contains("sends/sec"));
         image.getOutput().println("tinyBenchmarks: " + resultString);
@@ -128,5 +128,21 @@ public class SqueakBasicImageTest extends AbstractSqueakTestCaseWithImage {
         } catch (final UnknownHostException e) {
             fail(e.toString());
         }
+    }
+
+    @Test
+    public void test13CannotReturnAtStart() {
+        assertEquals("'bla2'", evaluate("| result | \n" +
+                        "[ result := [^'bla1'] on: BlockCannotReturn do: [:e | 'bla2' ]] fork. \n" +
+                        "Processor yield.\n" +
+                        "result").toString());
+    }
+
+    @Test
+    public void test14CannotReturnInTheMiddle() {
+        assertEquals("'bla2'", evaluate("| result | \n" +
+                        "[ result := [thisContext yourself. ^'bla1'] on: BlockCannotReturn do: [:e | 'bla2' ]] fork. \n" +
+                        "Processor yield.\n" +
+                        "result").toString());
     }
 }

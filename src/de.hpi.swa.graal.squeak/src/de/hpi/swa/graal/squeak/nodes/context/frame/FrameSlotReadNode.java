@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -13,6 +13,7 @@ import com.oracle.truffle.api.frame.FrameSlot;
 import com.oracle.truffle.api.frame.FrameSlotKind;
 import com.oracle.truffle.api.frame.FrameUtil;
 
+import de.hpi.swa.graal.squeak.model.CompiledBlockObject;
 import de.hpi.swa.graal.squeak.model.CompiledCodeObject;
 
 @ImportStatic(FrameSlotKind.class)
@@ -29,11 +30,18 @@ public abstract class FrameSlotReadNode extends AbstractFrameSlotNode {
 
     public static FrameSlotReadNode create(final CompiledCodeObject code, final int index) {
         // Only clear stack values, not receiver, arguments, or temporary variables.
-        final boolean clear = index >= code.getNumArgsAndCopied() + code.getNumTemps();
+        final boolean clear = index >= (code instanceof CompiledBlockObject ? code.getNumArgsAndCopied() : code.getNumTemps());
         return FrameSlotReadNodeGen.create(clear, code.getStackSlot(index));
     }
 
-    public abstract Object executeRead(Frame frame);
+    public final Object executeRead(final Frame frame) {
+        final Object value = executeReadUnsafe(frame);
+        assert value != null : "Unexpected `null` value";
+        return value;
+    }
+
+    /* Unsafe as it may return `null` values. */
+    public abstract Object executeReadUnsafe(Frame frame);
 
     @Specialization(guards = "frame.getFrameDescriptor().getFrameSlotKind(getSlot()) == Boolean")
     protected final boolean readBoolean(final Frame frame) {
@@ -83,7 +91,6 @@ public abstract class FrameSlotReadNode extends AbstractFrameSlotNode {
              */
             CompilerDirectives.transferToInterpreter();
             value = frame.getValue(getSlot());
-            assert value != null : "Unexpected `null` value";
         } else {
             value = FrameUtil.getObjectSafe(frame, getSlot());
         }

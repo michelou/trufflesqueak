@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -70,7 +70,7 @@ public final class ContextObjectNodes {
                         @Cached("index") final long cachedIndex,
                         @Cached("createReadNode(cachedContext, cachedIndex)") final FrameSlotReadNode readNode,
                         @Cached("createBinaryProfile()") final ConditionProfile isNullProfile) {
-            return NilObject.nullToNil(readNode.executeRead(cachedContext.getTruffleFrame()), isNullProfile);
+            return NilObject.nullToNil(readNode.executeReadUnsafe(cachedContext.getTruffleFrame()), isNullProfile);
         }
 
         protected static final FrameSlotReadNode createReadNode(final ContextObject context, final long index) {

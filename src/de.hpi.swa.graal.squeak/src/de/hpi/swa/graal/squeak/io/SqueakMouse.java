@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -50,7 +50,7 @@ public final class SqueakMouse extends MouseInputAdapter {
 
     @Override
     public void mouseWheelMoved(final MouseWheelEvent e) {
-        display.addEvent(EVENT_TYPE.MOUSE_WHEEL, 0L /* X-Axis Scrolling is not supported */, e.getWheelRotation() * MOUSE.WHEEL_DELTA_FACTOR, display.buttons >> 3, 0L);
+        display.addEvent(EVENT_TYPE.MOUSE_WHEEL, 0L /* X-Axis Scrolling is not supported */, (long) (e.getPreciseWheelRotation() * MOUSE.WHEEL_DELTA_FACTOR), display.buttons >> 3, 0L);
     }
 
     private void recordMouseEvent(final MOUSE_EVENT type, final MouseEvent e) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -30,6 +30,7 @@ import de.hpi.swa.graal.squeak.model.NilObject;
 import de.hpi.swa.graal.squeak.model.layout.ObjectLayouts.CONTEXT;
 import de.hpi.swa.graal.squeak.nodes.ExecuteTopLevelContextNode;
 import de.hpi.swa.graal.squeak.shared.SqueakLanguageConfig;
+import de.hpi.swa.graal.squeak.shared.SqueakLanguageOptions;
 import de.hpi.swa.graal.squeak.util.ArrayUtils;
 import de.hpi.swa.graal.squeak.util.FrameAccess;
 
@@ -82,7 +83,7 @@ public abstract class AbstractSqueakTestCase {
     }
 
     protected static ExecuteTopLevelContextNode createContext(final CompiledMethodObject code, final Object receiver, final Object[] arguments) {
-        final ContextObject testContext = ContextObject.create(image, arguments.length + code.getSqueakContextSize());
+        final ContextObject testContext = ContextObject.create(image, code.getSqueakContextSize());
         testContext.atput0(CONTEXT.METHOD, code);
         testContext.atput0(CONTEXT.RECEIVER, receiver);
         testContext.atput0(CONTEXT.INSTRUCTION_POINTER, (long) code.getInitialPC());
@@ -131,9 +132,9 @@ public abstract class AbstractSqueakTestCase {
         assert context == null && image == null;
         final Builder contextBuilder = Context.newBuilder();
         contextBuilder.allowAllAccess(true);
-        contextBuilder.option(SqueakLanguageConfig.ID + ".ImagePath", imagePath);
-        contextBuilder.option(SqueakLanguageConfig.ID + ".Headless", "true");
-        contextBuilder.option(SqueakLanguageConfig.ID + ".Testing", "true");
+        contextBuilder.option(SqueakLanguageConfig.ID + "." + SqueakLanguageOptions.IMAGE_PATH, imagePath);
+        contextBuilder.option(SqueakLanguageConfig.ID + "." + SqueakLanguageOptions.HEADLESS, "true");
+        contextBuilder.option(SqueakLanguageConfig.ID + "." + SqueakLanguageOptions.TESTING, "true");
         context = contextBuilder.build();
         context.initialize(SqueakLanguageConfig.ID);
         context.enter();

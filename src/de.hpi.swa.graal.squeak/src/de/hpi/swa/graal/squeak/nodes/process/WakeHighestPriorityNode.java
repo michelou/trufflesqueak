@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -32,7 +32,7 @@ public final class WakeHighestPriorityNode extends AbstractNodeWithImage {
 
     private WakeHighestPriorityNode(final CompiledCodeObject code) {
         super(code.image);
-        contextNode = GetOrCreateContextNode.create(code);
+        contextNode = GetOrCreateContextNode.create(code, true);
     }
 
     public static WakeHighestPriorityNode create(final CompiledCodeObject code) {

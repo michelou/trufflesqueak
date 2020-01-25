@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -75,7 +75,7 @@ public final class PolyglotPlugin extends AbstractPrimitiveFactoryHolder {
 
     @Override
     public boolean isEnabled(final SqueakImageContext image) {
-        return image.supportsForeignObject();
+        return true; // TODO: this check will be removed soon.
     }
 
     @Override
@@ -381,6 +381,13 @@ public final class PolyglotPlugin extends AbstractPrimitiveFactoryHolder {
                 throw primitiveFailedCapturing(e);
             } catch (final UnsupportedMessageException e) {
                 throw SqueakException.illegalState(e);
+            } catch (final Exception e) {
+                /*
+                 * Workaround: catch all exceptions raised by other languages to avoid crashes (see
+                 * https://github.com/oracle/truffleruby/issues/1864).
+                 */
+                errorProfile.enter();
+                throw primitiveFailedCapturing(e);
             }
         }
     }
@@ -421,6 +428,13 @@ public final class PolyglotPlugin extends AbstractPrimitiveFactoryHolder {
                 throw primitiveFailedCapturing(e);
             } catch (final UnsupportedMessageException e) {
                 throw SqueakException.illegalState(e);
+            } catch (final Exception e) {
+                /*
+                 * Workaround: catch all exceptions raised by other languages to avoid crashes (see
+                 * https://github.com/oracle/truffleruby/issues/1864).
+                 */
+                errorProfile.enter();
+                throw primitiveFailedCapturing(e);
             }
         }
     }
@@ -831,12 +845,12 @@ public final class PolyglotPlugin extends AbstractPrimitiveFactoryHolder {
             try {
                 final Object members = lib.getMembers(object, true);
                 final int size = (int) membersLib.getArraySize(members);
-                final NativeObject[] byteStrings = new NativeObject[size];
+                final Object[] byteStrings = new Object[size];
                 for (int i = 0; i < size; i++) {
                     final Object memberName = membersLib.readArrayElement(members, i);
                     byteStrings[i] = method.image.asByteString(memberNameLib.asString(memberName));
                 }
-                return method.image.asArrayOfNativeObjects(byteStrings);
+                return method.image.asArrayOfObjects(byteStrings);
             } catch (final UnsupportedMessageException | InvalidArrayIndexException e) {
                 throw SqueakException.illegalState(e);
             }
@@ -1037,6 +1051,13 @@ public final class PolyglotPlugin extends AbstractPrimitiveFactoryHolder {
                 throw primitiveFailedCapturing(e);
             } catch (final UnsupportedMessageException e) {
                 throw SqueakException.illegalState(e);
+            } catch (final Exception e) {
+                /*
+                 * Workaround: catch all exceptions raised by other languages to avoid crashes (see
+                 * https://github.com/oracle/truffleruby/issues/1864).
+                 */
+                errorProfile.enter();
+                throw primitiveFailedCapturing(e);
             }
         }
     }

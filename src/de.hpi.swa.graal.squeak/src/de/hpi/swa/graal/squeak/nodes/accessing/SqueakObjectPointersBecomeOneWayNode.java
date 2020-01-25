@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -27,7 +27,6 @@ import de.hpi.swa.graal.squeak.model.layout.ObjectLayouts.CONTEXT;
 import de.hpi.swa.graal.squeak.nodes.AbstractNode;
 import de.hpi.swa.graal.squeak.nodes.accessing.AbstractPointersObjectNodes.AbstractPointersObjectReadNode;
 import de.hpi.swa.graal.squeak.nodes.accessing.AbstractPointersObjectNodes.AbstractPointersObjectWriteNode;
-import de.hpi.swa.graal.squeak.nodes.accessing.ArrayObjectNodes.ArrayObjectTraceableToObjectArrayNode;
 import de.hpi.swa.graal.squeak.nodes.accessing.ContextObjectNodes.ContextObjectReadNode;
 import de.hpi.swa.graal.squeak.nodes.accessing.ContextObjectNodes.ContextObjectWriteNode;
 
@@ -180,9 +179,8 @@ public abstract class SqueakObjectPointersBecomeOneWayNode extends AbstractNode 
     }
 
     @Specialization(guards = "obj.isTraceable()")
-    protected final void doArray(final ArrayObject obj, final Object[] from, final Object[] to, final boolean copyHash,
-                    @Cached final ArrayObjectTraceableToObjectArrayNode getObjectArrayNode) {
-        pointersBecomeOneWay(getObjectArrayNode.execute(obj), from, to, copyHash);
+    protected final void doArray(final ArrayObject obj, final Object[] from, final Object[] to, final boolean copyHash) {
+        pointersBecomeOneWay(obj.getObjectStorage(), from, to, copyHash);
     }
 
     @Specialization

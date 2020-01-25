@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -33,7 +33,7 @@ public abstract class MaterializeContextOnMethodExitNode extends AbstractNodeWit
     protected final void doMaterialize(final VirtualFrame frame,
                     @Cached("createBinaryProfile()") final ConditionProfile isNotLastSeenContextProfile,
                     @Cached("createBinaryProfile()") final ConditionProfile continueProfile,
-                    @Cached("create(code)") final GetOrCreateContextNode getOrCreateContextNode) {
+                    @Cached("create(code, true)") final GetOrCreateContextNode getOrCreateContextNode) {
         final ContextObject lastSeenContext = code.image.lastSeenContext;
         final ContextObject context = getOrCreateContextNode.executeGet(frame);
         if (isNotLastSeenContextProfile.profile(context != lastSeenContext)) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -54,6 +54,11 @@ public final class PointersObject extends AbstractPointersObject {
             writeNode.execute(this, i, pointersObject[i]);
         }
         assert size() == pointersObject.length;
+        if (isProcess()) { /* Collect suspended contexts */
+            final AbstractPointersObjectReadNode readNode = AbstractPointersObjectReadNode.getUncached();
+            final ContextObject suspendedContext = (ContextObject) readNode.execute(this, PROCESS.SUSPENDED_CONTEXT);
+            chunk.getReader().getSuspendedContexts().put(this, suspendedContext);
+        }
     }
 
     public void become(final PointersObject other) {
@@ -87,6 +92,10 @@ public final class PointersObject extends AbstractPointersObject {
 
     public boolean isPoint() {
         return getSqueakClass() == image.pointClass;
+    }
+
+    public boolean isProcess() {
+        return getSqueakClass() == image.processClass;
     }
 
     public int[] getFormBits(final AbstractPointersObjectReadNode readNode) {

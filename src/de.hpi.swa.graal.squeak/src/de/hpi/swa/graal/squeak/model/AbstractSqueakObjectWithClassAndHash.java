@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -25,12 +25,6 @@ public abstract class AbstractSqueakObjectWithClassAndHash extends AbstractSquea
     protected AbstractSqueakObjectWithClassAndHash(final SqueakImageContext image, final ClassObject klass) {
         super(image);
         squeakClass = klass;
-    }
-
-    protected AbstractSqueakObjectWithClassAndHash(final SqueakImageContext image, final int hash) {
-        super(image, hash);
-        // TODO: Generate new hash if `0`. This might have something to do with compact classes?
-        squeakClass = null;
     }
 
     protected AbstractSqueakObjectWithClassAndHash(final SqueakImageContext image, final long hash, final ClassObject klass) {
@@ -74,7 +68,7 @@ public abstract class AbstractSqueakObjectWithClassAndHash extends AbstractSquea
     @Override
     public String toString() {
         CompilerAsserts.neverPartOfCompilation();
-        return "a " + getSqueakClassName();
+        return "a " + getSqueakClassName() + " @" + Integer.toHexString(hashCode());
     }
 
     public final Object send(final String selector, final Object... arguments) {

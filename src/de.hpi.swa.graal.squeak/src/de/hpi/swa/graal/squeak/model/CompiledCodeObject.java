@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -38,6 +38,7 @@ import de.hpi.swa.graal.squeak.util.MiscUtils;
 
 @ExportLibrary(InteropLibrary.class)
 public abstract class CompiledCodeObject extends AbstractSqueakObjectWithHash {
+    public static final String SOURCE_UNAVAILABLE = "Source unavailable";
 
     public enum SLOT_IDENTIFIER {
         THIS_MARKER,
@@ -107,7 +108,16 @@ public abstract class CompiledCodeObject extends AbstractSqueakObjectWithHash {
 
     public final Source getSource() {
         if (source == null) {
-            source = Source.newBuilder(SqueakLanguageConfig.ID, CompiledCodeObjectPrinter.getString(this), toString()).build();
+            String contents;
+            String toString;
+            try {
+                contents = CompiledCodeObjectPrinter.getString(this);
+                toString = toString();
+            } catch (final RuntimeException e) {
+                contents = SOURCE_UNAVAILABLE;
+                toString = "<unavailable>";
+            }
+            source = Source.newBuilder(SqueakLanguageConfig.ID, contents, toString).mimeType("text/plain").build();
         }
         return source;
     }
@@ -214,7 +224,7 @@ public abstract class CompiledCodeObject extends AbstractSqueakObjectWithHash {
          * Arguments and copied values are also pushed onto the stack in {@link EnterCodeNode},
          * therefore there must be enough slots for all these values as well as the Squeak stack.
          */
-        return getNumArgsAndCopied() + getSqueakContextSize();
+        return getSqueakContextSize();
     }
 
     @Override
@@ -225,16 +235,15 @@ public abstract class CompiledCodeObject extends AbstractSqueakObjectWithHash {
     @Override
     public final void fillin(final SqueakImageChunk chunk) {
         CompilerDirectives.transferToInterpreterAndInvalidate();
-        final long[] words = chunk.getWords();
         // header is a tagged small integer
-        final long header = words[0] >> 3;
+        final long header = chunk.getWord(0) >> 3;
         final int numberOfLiterals = (int) (header & 0x7fff);
         final Object[] ptrs = chunk.getPointers(numberOfLiterals + 1);
         assert literals == null;
         literals = ptrs;
         decodeHeader();
         assert bytes == null;
-        bytes = chunk.getBytes(ptrs.length * SqueakImageFlags.WORD_SIZE);
+        bytes = Arrays.copyOfRange(chunk.getBytes(), ptrs.length * SqueakImageFlags.WORD_SIZE, chunk.getBytes().length);
         assert innerBlocks == null : "Should not have any inner blocks yet";
     }
 

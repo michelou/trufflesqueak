@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -66,15 +66,26 @@ public final class CompiledMethodObject extends CompiledCodeObject {
     public String toString() {
         CompilerAsserts.neverPartOfCompilation();
         String className = "UnknownClass";
-        String selector = "unknownSelector";
-        if (hasMethodClassSlow()) {
-            className = getMethodClassSlow().getClassName();
+        final ClassObject methodClass = getMethodClassSlow();
+        if (methodClass != null) {
+            className = methodClass.getClassName();
         }
+        return className + ">>" + getNotNilSelector();
+    }
+
+    public String getNotNilSelector() {
+        CompilerAsserts.neverPartOfCompilation();
+        String selector = "DoIt";
         final NativeObject selectorObj = getCompiledInSelector();
         if (selectorObj != null) {
             selector = selectorObj.asStringUnsafe();
+        } else if (getNumArgs() > 0) {
+            selector += ":";
+            for (int i = 1; i < getNumArgs(); i++) {
+                selector += "with:";
+            }
         }
-        return className + ">>" + selector;
+        return selector;
     }
 
     @Override
@@ -109,7 +120,7 @@ public final class CompiledMethodObject extends CompiledCodeObject {
     }
 
     /** CompiledMethod>>#methodClassAssociation. */
-    private PointersObject getMethodClassAssociation() {
+    private AbstractSqueakObject getMethodClassAssociation() {
         /**
          * From the CompiledMethod class description:
          *
@@ -119,7 +130,7 @@ public final class CompiledMethodObject extends CompiledCodeObject {
          * may be nil (as would be the case for example of methods providing a pool of inst var
          * accessors).
          */
-        return (PointersObject) literals[literals.length - 1];
+        return (AbstractSqueakObject) literals[literals.length - 1];
     }
 
     public boolean hasMethodClassSlow() {
@@ -128,22 +139,27 @@ public final class CompiledMethodObject extends CompiledCodeObject {
     }
 
     public boolean hasMethodClass(final AbstractPointersObjectReadNode readNode) {
-        return readNode.execute(getMethodClassAssociation(), CLASS_BINDING.VALUE) != NilObject.SINGLETON;
+        final AbstractSqueakObject mca = getMethodClassAssociation();
+        return mca != NilObject.SINGLETON && readNode.execute((AbstractPointersObject) mca, CLASS_BINDING.VALUE) != NilObject.SINGLETON;
     }
 
     public ClassObject getMethodClassSlow() {
         CompilerAsserts.neverPartOfCompilation();
-        return getMethodClass(AbstractPointersObjectReadNode.getUncached());
+        final AbstractPointersObjectReadNode readNode = AbstractPointersObjectReadNode.getUncached();
+        if (hasMethodClass(readNode)) {
+            return getMethodClass(readNode);
+        }
+        return null;
     }
 
     /** CompiledMethod>>#methodClass. */
     public ClassObject getMethodClass(final AbstractPointersObjectReadNode readNode) {
-        return (ClassObject) readNode.execute(getMethodClassAssociation(), CLASS_BINDING.VALUE);
+        return (ClassObject) readNode.execute((AbstractPointersObject) getMethodClassAssociation(), CLASS_BINDING.VALUE);
     }
 
     /** CompiledMethod>>#methodClass:. */
     public void setMethodClass(final AbstractPointersObjectWriteNode writeNode, final ClassObject newClass) {
-        writeNode.execute(getMethodClassAssociation(), CLASS_BINDING.VALUE, newClass);
+        writeNode.execute((AbstractPointersObject) getMethodClassAssociation(), CLASS_BINDING.VALUE, newClass);
     }
 
     public void setHeader(final long header) {

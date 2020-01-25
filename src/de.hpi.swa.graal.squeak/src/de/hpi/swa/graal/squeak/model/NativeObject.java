@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
 package de.hpi.swa.graal.squeak.model;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 import com.oracle.truffle.api.CompilerAsserts;
@@ -32,10 +34,12 @@ import de.hpi.swa.graal.squeak.interop.WrapToSqueakNode;
 import de.hpi.swa.graal.squeak.nodes.accessing.NativeObjectNodes.NativeObjectSizeNode;
 import de.hpi.swa.graal.squeak.nodes.accessing.NativeObjectNodes.NativeObjectWriteNode;
 import de.hpi.swa.graal.squeak.util.ArrayConversionUtils;
+import de.hpi.swa.graal.squeak.util.ArrayUtils;
 import de.hpi.swa.graal.squeak.util.UnsafeUtils;
 
 @ExportLibrary(InteropLibrary.class)
 public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
+    public static final String REPLACEMENT_CHAR = StandardCharsets.UTF_8.newDecoder().replacement();
     public static final short BYTE_MAX = (short) (Math.pow(2, Byte.SIZE) - 1);
     public static final int SHORT_MAX = (int) (Math.pow(2, Short.SIZE) - 1);
     public static final long INTEGER_MAX = (long) (Math.pow(2, Integer.SIZE) - 1);
@@ -43,8 +47,8 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
     @CompilationFinal private Object storage;
 
     public NativeObject(final SqueakImageContext image) { // constructor for special selectors
-        super(image, -1, null);
-        storage = new byte[0];
+        super(image, AbstractSqueakObjectWithHash.HASH_UNINITIALIZED, null);
+        storage = ArrayUtils.EMPTY_ARRAY;
     }
 
     private NativeObject(final SqueakImageContext image, final ClassObject classObject, final Object storage) {
@@ -65,7 +69,7 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
     }
 
     public static NativeObject newNativeBytes(final SqueakImageChunk chunk) {
-        return new NativeObject(chunk.image, chunk.getHash(), chunk.getSqClass(), chunk.getBytes());
+        return new NativeObject(chunk.getImage(), chunk.getHash(), chunk.getSqClass(), chunk.getBytes());
     }
 
     public static NativeObject newNativeBytes(final SqueakImageContext img, final ClassObject klass, final byte[] bytes) {
@@ -77,7 +81,7 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
     }
 
     public static NativeObject newNativeInts(final SqueakImageChunk chunk) {
-        return new NativeObject(chunk.image, chunk.getHash(), chunk.getSqClass(), chunk.getInts());
+        return new NativeObject(chunk.getImage(), chunk.getHash(), chunk.getSqClass(), ArrayConversionUtils.intsFromBytes(chunk.getBytes()));
     }
 
     public static NativeObject newNativeInts(final SqueakImageContext img, final ClassObject klass, final int size) {
@@ -89,7 +93,7 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
     }
 
     public static NativeObject newNativeLongs(final SqueakImageChunk chunk) {
-        return new NativeObject(chunk.image, chunk.getHash(), chunk.getSqClass(), chunk.getLongs());
+        return new NativeObject(chunk.getImage(), chunk.getHash(), chunk.getSqClass(), ArrayConversionUtils.longsFromBytes(chunk.getBytes()));
     }
 
     public static NativeObject newNativeLongs(final SqueakImageContext img, final ClassObject klass, final int size) {
@@ -101,7 +105,7 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
     }
 
     public static NativeObject newNativeShorts(final SqueakImageChunk chunk) {
-        return new NativeObject(chunk.image, chunk.getHash(), chunk.getSqClass(), chunk.getShorts());
+        return new NativeObject(chunk.getImage(), chunk.getHash(), chunk.getSqClass(), ArrayConversionUtils.shortsFromBytes(chunk.getBytes()));
     }
 
     public static NativeObject newNativeShorts(final SqueakImageContext img, final ClassObject klass, final int size) {
@@ -114,22 +118,14 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
 
     @Override
     public void fillin(final SqueakImageChunk chunk) {
-        if (isByteType()) {
-            final byte[] bytes = chunk.getBytes();
-            setStorage(bytes);
-            if (image.getDebugErrorSelector() == null && Arrays.equals(SqueakImageContext.DEBUG_ERROR_SELECTOR_NAME, bytes)) {
+        if (storage == ArrayUtils.EMPTY_ARRAY) { /* Fill in special selectors. */
+            setStorage(chunk.getBytes());
+        } else if (image.isHeadless() && isByteType()) {
+            if (image.getDebugErrorSelector() == null && Arrays.equals(SqueakImageContext.DEBUG_ERROR_SELECTOR_NAME, getByteStorage())) {
                 image.setDebugErrorSelector(this);
-            } else if (image.getDebugSyntaxErrorSelector() == null && Arrays.equals(SqueakImageContext.DEBUG_SYNTAX_ERROR_SELECTOR_NAME, bytes)) {
+            } else if (image.getDebugSyntaxErrorSelector() == null && Arrays.equals(SqueakImageContext.DEBUG_SYNTAX_ERROR_SELECTOR_NAME, getByteStorage())) {
                 image.setDebugSyntaxErrorSelector(this);
             }
-        } else if (isShortType()) {
-            setStorage(chunk.getShorts());
-        } else if (isIntType()) {
-            setStorage(chunk.getInts());
-        } else if (isLongType()) {
-            setStorage(chunk.getLongs());
-        } else {
-            throw SqueakException.create("Unsupported type");
         }
     }
 
@@ -176,12 +172,12 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
 
     public byte getByte(final long index) {
         assert isByteType();
-        return UnsafeUtils.getByte(storage, index);
+        return UnsafeUtils.getByte((byte[]) storage, index);
     }
 
     public void setByte(final long index, final byte value) {
         assert isByteType();
-        UnsafeUtils.putByte(storage, index, value);
+        UnsafeUtils.putByte((byte[]) storage, index, value);
     }
 
     public int getByteLength() {
@@ -195,12 +191,12 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
 
     public int getInt(final long index) {
         assert isIntType();
-        return UnsafeUtils.getInt(storage, index);
+        return UnsafeUtils.getInt((int[]) storage, index);
     }
 
     public void setInt(final long index, final int value) {
         assert isIntType();
-        UnsafeUtils.putInt(storage, index, value);
+        UnsafeUtils.putInt((int[]) storage, index, value);
     }
 
     public int getIntLength() {
@@ -214,12 +210,12 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
 
     public long getLong(final long index) {
         assert isLongType();
-        return UnsafeUtils.getLong(storage, index);
+        return UnsafeUtils.getLong((long[]) storage, index);
     }
 
     public void setLong(final long index, final long value) {
         assert isLongType();
-        UnsafeUtils.putLong(storage, index, value);
+        UnsafeUtils.putLong((long[]) storage, index, value);
     }
 
     public int getLongLength() {
@@ -233,12 +229,12 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
 
     public short getShort(final long index) {
         assert isShortType();
-        return UnsafeUtils.getShort(storage, index);
+        return UnsafeUtils.getShort((short[]) storage, index);
     }
 
     public void setShort(final long index, final short value) {
         assert isShortType();
-        UnsafeUtils.putShort(storage, index, value);
+        UnsafeUtils.putShort((short[]) storage, index, value);
     }
 
     public int getShortLength() {
@@ -252,10 +248,6 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
 
     public boolean hasSameFormat(final ClassObject other) {
         return getSqueakClass().getFormat() == other.getFormat();
-    }
-
-    public boolean hasSameStorageType(final NativeObject other) {
-        return storage.getClass() == other.storage.getClass();
     }
 
     public boolean isByteType() {
@@ -279,8 +271,9 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
         this.storage = storage;
     }
 
+    @TruffleBoundary
     public String asStringUnsafe() {
-        return ArrayConversionUtils.bytesToString(getByteStorage());
+        return StandardCharsets.UTF_8.decode(ByteBuffer.wrap((byte[]) storage)).toString();
     }
 
     @TruffleBoundary
@@ -289,14 +282,21 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
         return new String(ints, 0, ints.length);
     }
 
-    @TruffleBoundary
     @Override
     public String toString() {
         CompilerAsserts.neverPartOfCompilation();
         if (isByteType()) {
             final ClassObject squeakClass = getSqueakClass();
             if (squeakClass.isStringClass()) {
-                return asStringUnsafe();
+                final String fullString = asStringUnsafe();
+                final int fullLength = fullString.length();
+                /* Split at first non-printable character. */
+                final String displayString = fullString.split("[^\\p{Print}]", 2)[0];
+                if (fullLength <= 40 && fullLength == displayString.length()) {
+                    /* fullString is short and has printable characters only. */
+                    return "'" + fullString + "'";
+                }
+                return String.format("'%.30s...' (string length: %s)", displayString, fullLength);
             } else if (squeakClass.isSymbolClass()) {
                 return "#" + asStringUnsafe();
             } else {

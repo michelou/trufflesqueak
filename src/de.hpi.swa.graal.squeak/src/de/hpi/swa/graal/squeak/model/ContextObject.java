@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -35,6 +35,7 @@ import de.hpi.swa.graal.squeak.util.MiscUtils;
 
 public final class ContextObject extends AbstractSqueakObjectWithHash {
     @CompilationFinal private MaterializedFrame truffleFrame;
+    @CompilationFinal private PointersObject process;
     @CompilationFinal private int size;
     private boolean hasModifiedSender = false;
     private boolean escaped = false;
@@ -479,12 +480,12 @@ public final class ContextObject extends AbstractSqueakObjectWithHash {
         if (hasMethod()) {
             final BlockClosureObject closure = getClosure();
             if (closure != null) {
-                return "CTX [] in " + getMethod() + " #" + hashCode();
+                return "CTX [] in " + getMethod() + " @" + Integer.toHexString(hashCode());
             } else {
-                return "CTX " + getMethod() + " #" + hashCode();
+                return "CTX " + getMethod() + " @" + Integer.toHexString(hashCode());
             }
         } else {
-            return "CTX without method" + " #" + hashCode();
+            return "CTX without method @" + Integer.toHexString(hashCode());
         }
     }
 
@@ -537,6 +538,7 @@ public final class ContextObject extends AbstractSqueakObjectWithHash {
         writeNode.execute(scheduler, PROCESS_SCHEDULER.ACTIVE_PROCESS, newProcess);
         writeNode.execute(currentProcess, PROCESS.SUSPENDED_CONTEXT, this);
         final ContextObject newActiveContext = (ContextObject) readNode.execute(newProcess, PROCESS.SUSPENDED_CONTEXT);
+        newActiveContext.setProcess(newProcess);
         writeNode.execute(newProcess, PROCESS.SUSPENDED_CONTEXT, NilObject.SINGLETON);
         if (CompilerDirectives.isPartialEvaluationConstant(newActiveContext)) {
             throw ProcessSwitch.create(newActiveContext);
@@ -608,5 +610,14 @@ public final class ContextObject extends AbstractSqueakObjectWithHash {
                 tracer.addIfUnmarked(atTemp(i));
             }
         }
+    }
+
+    public PointersObject getProcess() {
+        return process;
+    }
+
+    public void setProcess(final PointersObject process) {
+        assert process != null && (this.process == null || this.process == process);
+        this.process = process;
     }
 }

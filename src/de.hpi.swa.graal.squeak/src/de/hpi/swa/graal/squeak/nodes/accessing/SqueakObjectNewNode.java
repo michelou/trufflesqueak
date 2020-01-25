@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -89,7 +89,7 @@ public abstract class SqueakObjectNewNode extends AbstractNodeWithImage {
     @SuppressWarnings("unused")
     @Specialization(guards = {"classObject.isIndexableWithInstVars()", "classObject.isBlockClosureClass()"})
     protected final BlockClosureObject doBlockClosure(final ClassObject classObject, final int extraSize) {
-        return new BlockClosureObject(image, extraSize);
+        return BlockClosureObject.create(image, extraSize);
     }
 
     @Specialization(guards = {"classObject.isIndexableWithInstVars()", "!classObject.isMethodContextClass()", "!classObject.isBlockClosureClass()"})

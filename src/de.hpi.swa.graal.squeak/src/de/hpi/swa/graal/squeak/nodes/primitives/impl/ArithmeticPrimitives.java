@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -1218,9 +1218,9 @@ public final class ArithmeticPrimitives extends AbstractPrimitiveFactoryHolder {
 
     @GenerateNodeFactory
     @SqueakPrimitive(indices = 159)
-    protected abstract static class PrimHashMultiplyNode extends AbstractArithmeticPrimitiveNode implements UnaryPrimitive {
-        private static final int HASH_MULTIPLY_CONSTANT = 1664525;
-        private static final long HASH_MULTIPLY_MASK = 0xFFFFFFFL;
+    public abstract static class PrimHashMultiplyNode extends AbstractArithmeticPrimitiveNode implements UnaryPrimitive {
+        public static final int HASH_MULTIPLY_CONSTANT = 1664525;
+        public static final int HASH_MULTIPLY_MASK = 0xFFFFFFF;
 
         protected PrimHashMultiplyNode(final CompiledMethodObject method) {
             super(method);
@@ -1423,6 +1423,20 @@ public final class ArithmeticPrimitives extends AbstractPrimitiveFactoryHolder {
                         @Cached("create(method.image)") final AsFloatObjectIfNessaryNode boxNode) {
             assert Double.isFinite(receiver);
             return boxNode.execute(Math.exp(receiver));
+        }
+    }
+
+    @GenerateNodeFactory
+    @SqueakPrimitive(indices = 575)
+    protected abstract static class PrimHighBitNode extends AbstractPrimitiveNode implements UnaryPrimitive {
+        protected PrimHighBitNode(final CompiledMethodObject method) {
+            super(method);
+        }
+
+        @Specialization
+        protected static final long doLong(final long receiver,
+                        @Cached("createBinaryProfile()") final ConditionProfile negativeProfile) {
+            return Long.SIZE - Long.numberOfLeadingZeros(negativeProfile.profile(receiver < 0) ? -receiver : receiver);
         }
     }
 

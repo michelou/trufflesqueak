@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -24,7 +24,6 @@ import com.oracle.truffle.api.dsl.GenerateNodeFactory;
 import com.oracle.truffle.api.dsl.ImportStatic;
 import com.oracle.truffle.api.dsl.NodeFactory;
 import com.oracle.truffle.api.dsl.Specialization;
-import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeCost;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.profiles.ConditionProfile;
@@ -203,9 +202,13 @@ public final class MiscellaneousPrimitives extends AbstractPrimitiveFactoryHolde
             return BooleanObject.wrap(receiver.pointsTo(thang));
         }
 
-        @Specialization(guards = {"receiver.isEmptyType()", "receiver.getEmptyStorage() > 0"})
+        @Specialization(guards = {"receiver.isEmptyType()"})
         protected static final boolean doEmptyArray(@SuppressWarnings("unused") final ArrayObject receiver, final Object thang) {
-            return BooleanObject.wrap(thang == NilObject.SINGLETON);
+            if (receiver.getEmptyStorage() > 0) {
+                return BooleanObject.wrap(thang == NilObject.SINGLETON);
+            } else {
+                return BooleanObject.FALSE;
+            }
         }
 
         @Specialization(guards = "receiver.isBooleanType()")
@@ -270,11 +273,6 @@ public final class MiscellaneousPrimitives extends AbstractPrimitiveFactoryHolde
         @Specialization(guards = {"receiver.isDoubleType()", "!isDouble(thang)", "!isNil(thang)"})
         protected static final boolean doArrayOfDoubles(final ArrayObject receiver, final Object thang) {
             return BooleanObject.FALSE;
-        }
-
-        @Specialization(guards = "receiver.isNativeObjectType()")
-        protected static final boolean doArrayOfNatives(final ArrayObject receiver, final Object thang) {
-            return BooleanObject.wrap(ArrayUtils.contains(receiver.getNativeObjectStorage(), thang));
         }
 
         @Specialization(guards = "receiver.isObjectType()")
@@ -424,7 +422,7 @@ public final class MiscellaneousPrimitives extends AbstractPrimitiveFactoryHolde
 
         @Specialization
         protected final NativeObject doVMPath(@SuppressWarnings("unused") final Object receiver) {
-            return method.image.asByteString(MiscUtils.getVMPath());
+            return method.image.asByteString(MiscUtils.getJavaHome());
         }
     }
 
@@ -605,14 +603,14 @@ public final class MiscellaneousPrimitives extends AbstractPrimitiveFactoryHolde
         }
 
         @Specialization(guards = {"receiver.getSqueakClass() == anotherObject.getSqueakClass()", "receiver.size() == anotherObject.size()"})
-        protected static final AbstractPointersObject doCopyAbstractPointers(final VariablePointersObject receiver, final VariablePointersObject anotherObject) {
+        protected static final AbstractPointersObject doCopyVariablePointers(final VariablePointersObject receiver, final VariablePointersObject anotherObject) {
             receiver.copyLayoutValuesFrom(anotherObject);
             System.arraycopy(anotherObject.getVariablePart(), 0, receiver.getVariablePart(), 0, anotherObject.getVariablePart().length);
             return receiver;
         }
 
         @Specialization(guards = {"receiver.getSqueakClass() == anotherObject.getSqueakClass()", "receiver.size() == anotherObject.size()"})
-        protected static final AbstractPointersObject doCopyAbstractPointers(final WeakVariablePointersObject receiver, final WeakVariablePointersObject anotherObject) {
+        protected static final AbstractPointersObject doCopyWeakPointers(final WeakVariablePointersObject receiver, final WeakVariablePointersObject anotherObject) {
             receiver.copyLayoutValuesFrom(anotherObject);
             System.arraycopy(anotherObject.getVariablePart(), 0, receiver.getVariablePart(), 0, anotherObject.getVariablePart().length);
             return receiver;
@@ -826,7 +824,6 @@ public final class MiscellaneousPrimitives extends AbstractPrimitiveFactoryHolde
          * </pre>
          */
 
-        @ExplodeLoop
         @SuppressWarnings("unused")
         @Specialization
         protected final ArrayObject getVMParameters(final Object receiver, final NotProvided index, final NotProvided value) {

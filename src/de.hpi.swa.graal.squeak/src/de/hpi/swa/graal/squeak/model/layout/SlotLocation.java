@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -12,6 +12,7 @@ import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.GenerateUncached;
+import com.oracle.truffle.api.dsl.ImportStatic;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.ControlFlowException;
 import com.oracle.truffle.api.nodes.Node;
@@ -24,6 +25,7 @@ import de.hpi.swa.graal.squeak.model.AbstractPointersObject;
 import de.hpi.swa.graal.squeak.model.NilObject;
 import de.hpi.swa.graal.squeak.model.layout.SlotLocationFactory.ReadSlotLocationNodeGen;
 import de.hpi.swa.graal.squeak.model.layout.SlotLocationFactory.WriteSlotLocationNodeGen;
+import de.hpi.swa.graal.squeak.nodes.SqueakGuards;
 import de.hpi.swa.graal.squeak.util.ArrayUtils;
 import de.hpi.swa.graal.squeak.util.UnsafeUtils;
 
@@ -111,6 +113,10 @@ public abstract class SlotLocation {
 
     public abstract boolean isSet(AbstractPointersObject object);
 
+    public void unset(@SuppressWarnings("unused") final AbstractPointersObject object) {
+        /* Do nothing by default. */
+    }
+
     public boolean isUninitialized() {
         return false;
     }
@@ -168,6 +174,7 @@ public abstract class SlotLocation {
         }
     }
 
+    @ImportStatic({SqueakGuards.class})
     @GenerateUncached
     public abstract static class WriteSlotLocationNode extends Node {
         public abstract void execute(SlotLocation location, AbstractPointersObject object, Object value);
@@ -177,6 +184,11 @@ public abstract class SlotLocation {
         }
 
         @Specialization
+        protected static final void doNil(final SlotLocation location, final AbstractPointersObject object, @SuppressWarnings("unused") final NilObject value) {
+            location.unset(object);
+        }
+
+        @Specialization(guards = "!isNil(value)")
         protected static final void doPrimitive(final PrimitiveLocation location, final AbstractPointersObject object, final Object value,
                         @Cached("createIdentityProfile()") final IntValueProfile primitiveUsedMapProfile) {
             location.writeProfiled(object, value, primitiveUsedMapProfile);
@@ -213,11 +225,17 @@ public abstract class SlotLocation {
 
         @Override
         public boolean canStore(final Object value) {
-            return false;
+            return value == NilObject.SINGLETON;
         }
     }
 
     protected abstract static class PrimitiveLocation extends SlotLocation {
+        private final int usedMask;
+
+        public PrimitiveLocation(final int index) {
+            usedMask = getPrimitiveUsedMask(index);
+        }
+
         public abstract Object readProfiled(AbstractPointersObject object, IntValueProfile primitiveUsedMapProfile);
 
         public abstract void writeProfiled(AbstractPointersObject object, Object value, IntValueProfile primitiveUsedMapProfile);
@@ -227,9 +245,34 @@ public abstract class SlotLocation {
             return true;
         }
 
+        @Override
+        public final boolean isSet(final AbstractPointersObject object) {
+            return (getPrimitiveUsedMap(object) & usedMask) != 0;
+        }
+
+        public final boolean isSet(final AbstractPointersObject object, final IntValueProfile primitiveUsedMapProfile) {
+            return (primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) & usedMask) != 0;
+        }
+
+        @Override
+        public final void unset(final AbstractPointersObject object) {
+            putPrimitiveUsedMap(object, getPrimitiveUsedMap(object) & ~usedMask);
+        }
+
+        public final void set(final AbstractPointersObject object) {
+            putPrimitiveUsedMap(object, getPrimitiveUsedMap(object) | usedMask);
+        }
+
+        public final void set(final AbstractPointersObject object, final IntValueProfile primitiveUsedMapProfile) {
+            putPrimitiveUsedMap(object, primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) | usedMask);
+        }
     }
 
     private abstract static class BoolLocation extends PrimitiveLocation {
+        private BoolLocation(final int index) {
+            super(index);
+        }
+
         @Override
         public final boolean isBool() {
             return true;
@@ -237,11 +280,15 @@ public abstract class SlotLocation {
 
         @Override
         public final boolean canStore(final Object value) {
-            return value instanceof Boolean;
+            return value instanceof Boolean || value == NilObject.SINGLETON;
         }
     }
 
     private abstract static class CharLocation extends PrimitiveLocation {
+        private CharLocation(final int index) {
+            super(index);
+        }
+
         @Override
         public final boolean isChar() {
             return true;
@@ -249,11 +296,15 @@ public abstract class SlotLocation {
 
         @Override
         public final boolean canStore(final Object value) {
-            return value instanceof Character;
+            return value instanceof Character || value == NilObject.SINGLETON;
         }
     }
 
     private abstract static class LongLocation extends PrimitiveLocation {
+        private LongLocation(final int index) {
+            super(index);
+        }
+
         @Override
         public final boolean isLong() {
             return true;
@@ -261,11 +312,15 @@ public abstract class SlotLocation {
 
         @Override
         public final boolean canStore(final Object value) {
-            return value instanceof Long;
+            return value instanceof Long || value == NilObject.SINGLETON;
         }
     }
 
     private abstract static class DoubleLocation extends PrimitiveLocation {
+        private DoubleLocation(final int index) {
+            super(index);
+        }
+
         @Override
         public final boolean isDouble() {
             return true;
@@ -273,7 +328,7 @@ public abstract class SlotLocation {
 
         @Override
         public final boolean canStore(final Object value) {
-            return value instanceof Double;
+            return value instanceof Double || value == NilObject.SINGLETON;
         }
     }
 
@@ -287,6 +342,12 @@ public abstract class SlotLocation {
         public final boolean canStore(final Object value) {
             return true;
         }
+
+        @Override
+        public final void unset(final AbstractPointersObject object) {
+            write(object, NilObject.SINGLETON);
+        }
+
     }
 
     protected static int getPrimitiveUsedMask(final int index) {
@@ -304,11 +365,10 @@ public abstract class SlotLocation {
 
     private static final class BoolInlineSlotLocation extends BoolLocation {
         private final long address;
-        private final int usedMask;
 
         private BoolInlineSlotLocation(final int index) {
+            super(index);
             address = PRIMITIVE_ADDRESSES[index];
-            usedMask = getPrimitiveUsedMask(index);
         }
 
         @Override
@@ -318,10 +378,6 @@ public abstract class SlotLocation {
             } else {
                 return NilObject.SINGLETON;
             }
-        }
-
-        private boolean isSet(final AbstractPointersObject object, final IntValueProfile primitiveUsedMapProfile) {
-            return primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object) & usedMask) != 0;
         }
 
         @Override
@@ -335,14 +391,9 @@ public abstract class SlotLocation {
         }
 
         @Override
-        public boolean isSet(final AbstractPointersObject object) {
-            return (getPrimitiveUsedMap(object) & usedMask) != 0;
-        }
-
-        @Override
         public void writeProfiled(final AbstractPointersObject object, final Object value, final IntValueProfile primitiveUsedMapProfile) {
             if (value instanceof Boolean) {
-                putPrimitiveUsedMap(object, primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) | usedMask);
+                set(object, primitiveUsedMapProfile);
                 UnsafeUtils.putBoolAt(object, address, (boolean) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -353,7 +404,7 @@ public abstract class SlotLocation {
         public void write(final AbstractPointersObject object, final Object value) {
             CompilerAsserts.neverPartOfCompilation();
             if (value instanceof Boolean) {
-                putPrimitiveUsedMap(object, getPrimitiveUsedMap(object) | usedMask);
+                set(object);
                 UnsafeUtils.putBoolAt(object, address, (boolean) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -368,11 +419,10 @@ public abstract class SlotLocation {
 
     private static final class BoolExtensionSlotLocation extends BoolLocation {
         private final int index;
-        private final int usedMask;
 
         private BoolExtensionSlotLocation(final int index) {
+            super(index);
             this.index = index - NUM_PRIMITIVE_INLINE_LOCATIONS;
-            usedMask = getPrimitiveUsedMask(index);
         }
 
         @Override
@@ -382,10 +432,6 @@ public abstract class SlotLocation {
             } else {
                 return NilObject.SINGLETON;
             }
-        }
-
-        private boolean isSet(final AbstractPointersObject object, final IntValueProfile primitiveUsedMapProfile) {
-            return (primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) & usedMask) != 0;
         }
 
         @Override
@@ -399,14 +445,9 @@ public abstract class SlotLocation {
         }
 
         @Override
-        public boolean isSet(final AbstractPointersObject object) {
-            return (getPrimitiveUsedMap(object) & usedMask) != 0;
-        }
-
-        @Override
         public void writeProfiled(final AbstractPointersObject object, final Object value, final IntValueProfile primitiveUsedMapProfile) {
             if (value instanceof Boolean) {
-                putPrimitiveUsedMap(object, primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) | usedMask);
+                set(object, primitiveUsedMapProfile);
                 UnsafeUtils.putBoolIntoLongs(object.primitiveExtension, index, (boolean) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -417,7 +458,7 @@ public abstract class SlotLocation {
         public void write(final AbstractPointersObject object, final Object value) {
             CompilerAsserts.neverPartOfCompilation();
             if (value instanceof Boolean) {
-                putPrimitiveUsedMap(object, getPrimitiveUsedMap(object) | usedMask);
+                set(object);
                 object.primitiveExtension[index] = (boolean) value ? 1 : 0;
                 UnsafeUtils.putBoolIntoLongs(object.primitiveExtension, index, (boolean) value);
             } else {
@@ -438,11 +479,10 @@ public abstract class SlotLocation {
 
     private static final class CharInlineSlotLocation extends CharLocation {
         private final long address;
-        private final int usedMask;
 
         private CharInlineSlotLocation(final int index) {
+            super(index);
             address = PRIMITIVE_ADDRESSES[index];
-            usedMask = getPrimitiveUsedMask(index);
         }
 
         @Override
@@ -452,10 +492,6 @@ public abstract class SlotLocation {
             } else {
                 return NilObject.SINGLETON;
             }
-        }
-
-        private boolean isSet(final AbstractPointersObject object, final IntValueProfile primitiveUsedMapProfile) {
-            return (primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) & usedMask) != 0;
         }
 
         @Override
@@ -469,14 +505,9 @@ public abstract class SlotLocation {
         }
 
         @Override
-        public boolean isSet(final AbstractPointersObject object) {
-            return (getPrimitiveUsedMap(object) & usedMask) != 0;
-        }
-
-        @Override
         public void writeProfiled(final AbstractPointersObject object, final Object value, final IntValueProfile primitiveUsedMapProfile) {
             if (value instanceof Character) {
-                putPrimitiveUsedMap(object, primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) | usedMask);
+                set(object, primitiveUsedMapProfile);
                 UnsafeUtils.putCharAt(object, address, (char) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -487,7 +518,7 @@ public abstract class SlotLocation {
         public void write(final AbstractPointersObject object, final Object value) {
             CompilerAsserts.neverPartOfCompilation();
             if (value instanceof Character) {
-                putPrimitiveUsedMap(object, getPrimitiveUsedMap(object) | usedMask);
+                set(object);
                 UnsafeUtils.putCharAt(object, address, (char) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -502,11 +533,10 @@ public abstract class SlotLocation {
 
     private static final class CharExtensionSlotLocation extends CharLocation {
         private final int index;
-        private final int usedMask;
 
         private CharExtensionSlotLocation(final int index) {
+            super(index);
             this.index = index - NUM_PRIMITIVE_INLINE_LOCATIONS;
-            usedMask = getPrimitiveUsedMask(index);
         }
 
         @Override
@@ -516,10 +546,6 @@ public abstract class SlotLocation {
             } else {
                 return NilObject.SINGLETON;
             }
-        }
-
-        private boolean isSet(final AbstractPointersObject object, final IntValueProfile primitiveUsedMapProfile) {
-            return (primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) & usedMask) != 0;
         }
 
         @Override
@@ -533,14 +559,9 @@ public abstract class SlotLocation {
         }
 
         @Override
-        public boolean isSet(final AbstractPointersObject object) {
-            return (getPrimitiveUsedMap(object) & usedMask) != 0;
-        }
-
-        @Override
         public void writeProfiled(final AbstractPointersObject object, final Object value, final IntValueProfile primitiveUsedMapProfile) {
             if (value instanceof Character) {
-                putPrimitiveUsedMap(object, primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) | usedMask);
+                set(object, primitiveUsedMapProfile);
                 UnsafeUtils.putCharIntoLongs(object.primitiveExtension, index, (char) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -551,7 +572,7 @@ public abstract class SlotLocation {
         public void write(final AbstractPointersObject object, final Object value) {
             CompilerAsserts.neverPartOfCompilation();
             if (value instanceof Character) {
-                putPrimitiveUsedMap(object, getPrimitiveUsedMap(object) | usedMask);
+                set(object);
                 UnsafeUtils.putCharIntoLongs(object.primitiveExtension, index, (char) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -571,11 +592,10 @@ public abstract class SlotLocation {
 
     private static final class LongInlineSlotLocation extends LongLocation {
         private final long address;
-        private final int usedMask;
 
         private LongInlineSlotLocation(final int index) {
+            super(index);
             address = PRIMITIVE_ADDRESSES[index];
-            usedMask = getPrimitiveUsedMask(index);
         }
 
         @Override
@@ -585,10 +605,6 @@ public abstract class SlotLocation {
             } else {
                 return NilObject.SINGLETON;
             }
-        }
-
-        private boolean isSet(final AbstractPointersObject object, final IntValueProfile primitiveUsedMapProfile) {
-            return (primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) & usedMask) != 0;
         }
 
         @Override
@@ -602,14 +618,9 @@ public abstract class SlotLocation {
         }
 
         @Override
-        public boolean isSet(final AbstractPointersObject object) {
-            return (getPrimitiveUsedMap(object) & usedMask) != 0;
-        }
-
-        @Override
         public void writeProfiled(final AbstractPointersObject object, final Object value, final IntValueProfile primitiveUsedMapProfile) {
             if (value instanceof Long) {
-                putPrimitiveUsedMap(object, primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) | usedMask);
+                set(object, primitiveUsedMapProfile);
                 UnsafeUtils.putLongAt(object, address, (long) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -620,7 +631,7 @@ public abstract class SlotLocation {
         public void write(final AbstractPointersObject object, final Object value) {
             CompilerAsserts.neverPartOfCompilation();
             if (value instanceof Long) {
-                putPrimitiveUsedMap(object, getPrimitiveUsedMap(object) | usedMask);
+                set(object);
                 UnsafeUtils.putLongAt(object, address, (long) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -635,11 +646,10 @@ public abstract class SlotLocation {
 
     private static final class LongExtensionSlotLocation extends LongLocation {
         private final int index;
-        private final int usedMask;
 
         private LongExtensionSlotLocation(final int index) {
+            super(index);
             this.index = index - NUM_PRIMITIVE_INLINE_LOCATIONS;
-            usedMask = getPrimitiveUsedMask(index);
         }
 
         @Override
@@ -649,10 +659,6 @@ public abstract class SlotLocation {
             } else {
                 return NilObject.SINGLETON;
             }
-        }
-
-        private boolean isSet(final AbstractPointersObject object, final IntValueProfile primitiveUsedMapProfile) {
-            return (primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) & usedMask) != 0;
         }
 
         @Override
@@ -666,14 +672,9 @@ public abstract class SlotLocation {
         }
 
         @Override
-        public boolean isSet(final AbstractPointersObject object) {
-            return (getPrimitiveUsedMap(object) & usedMask) != 0;
-        }
-
-        @Override
         public void writeProfiled(final AbstractPointersObject object, final Object value, final IntValueProfile primitiveUsedMapProfile) {
             if (value instanceof Long) {
-                putPrimitiveUsedMap(object, primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) | usedMask);
+                set(object, primitiveUsedMapProfile);
                 UnsafeUtils.putLong(object.primitiveExtension, index, (long) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -684,7 +685,7 @@ public abstract class SlotLocation {
         public void write(final AbstractPointersObject object, final Object value) {
             CompilerAsserts.neverPartOfCompilation();
             if (value instanceof Long) {
-                putPrimitiveUsedMap(object, getPrimitiveUsedMap(object) | usedMask);
+                set(object);
                 UnsafeUtils.putLong(object.primitiveExtension, index, (long) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -704,11 +705,10 @@ public abstract class SlotLocation {
 
     private static final class DoubleInlineSlotLocation extends DoubleLocation {
         private final long address;
-        private final int usedMask;
 
         private DoubleInlineSlotLocation(final int index) {
+            super(index);
             address = PRIMITIVE_ADDRESSES[index];
-            usedMask = getPrimitiveUsedMask(index);
         }
 
         @Override
@@ -718,10 +718,6 @@ public abstract class SlotLocation {
             } else {
                 return NilObject.SINGLETON;
             }
-        }
-
-        private boolean isSet(final AbstractPointersObject object, final IntValueProfile primitiveUsedMapProfile) {
-            return (primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) & usedMask) != 0;
         }
 
         @Override
@@ -735,14 +731,9 @@ public abstract class SlotLocation {
         }
 
         @Override
-        public boolean isSet(final AbstractPointersObject object) {
-            return (getPrimitiveUsedMap(object) & usedMask) != 0;
-        }
-
-        @Override
         public void writeProfiled(final AbstractPointersObject object, final Object value, final IntValueProfile primitiveUsedMapProfile) {
             if (value instanceof Double) {
-                putPrimitiveUsedMap(object, primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) | usedMask);
+                set(object, primitiveUsedMapProfile);
                 UnsafeUtils.putDoubleAt(object, address, (double) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -753,7 +744,7 @@ public abstract class SlotLocation {
         public void write(final AbstractPointersObject object, final Object value) {
             CompilerAsserts.neverPartOfCompilation();
             if (value instanceof Double) {
-                putPrimitiveUsedMap(object, getPrimitiveUsedMap(object) | usedMask);
+                set(object);
                 UnsafeUtils.putDoubleAt(object, address, (double) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -768,11 +759,10 @@ public abstract class SlotLocation {
 
     private static final class DoubleExtensionSlotLocation extends DoubleLocation {
         private final int index;
-        private final int usedMask;
 
         private DoubleExtensionSlotLocation(final int index) {
+            super(index);
             this.index = index - NUM_PRIMITIVE_INLINE_LOCATIONS;
-            usedMask = getPrimitiveUsedMask(index);
         }
 
         @Override
@@ -782,10 +772,6 @@ public abstract class SlotLocation {
             } else {
                 return NilObject.SINGLETON;
             }
-        }
-
-        private boolean isSet(final AbstractPointersObject obj, final IntValueProfile primitiveUsedMapProfile) {
-            return (primitiveUsedMapProfile.profile(getPrimitiveUsedMap(obj)) & usedMask) != 0;
         }
 
         @Override
@@ -799,14 +785,9 @@ public abstract class SlotLocation {
         }
 
         @Override
-        public boolean isSet(final AbstractPointersObject obj) {
-            return (getPrimitiveUsedMap(obj) & usedMask) != 0;
-        }
-
-        @Override
         public void writeProfiled(final AbstractPointersObject object, final Object value, final IntValueProfile primitiveUsedMapProfile) {
             if (value instanceof Double) {
-                putPrimitiveUsedMap(object, primitiveUsedMapProfile.profile(getPrimitiveUsedMap(object)) | usedMask);
+                set(object, primitiveUsedMapProfile);
                 UnsafeUtils.putDoubleIntoLongs(object.primitiveExtension, index, (double) value);
             } else {
                 throw IllegalWriteException.SINGLETON;
@@ -817,7 +798,7 @@ public abstract class SlotLocation {
         public void write(final AbstractPointersObject object, final Object value) {
             CompilerAsserts.neverPartOfCompilation();
             if (value instanceof Double) {
-                putPrimitiveUsedMap(object, getPrimitiveUsedMap(object) | usedMask);
+                set(object);
                 UnsafeUtils.putDoubleIntoLongs(object.primitiveExtension, index, (double) value);
             } else {
                 throw IllegalWriteException.SINGLETON;

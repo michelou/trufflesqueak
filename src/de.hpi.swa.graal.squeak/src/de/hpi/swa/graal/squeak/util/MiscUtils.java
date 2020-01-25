@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Software Architecture Group, Hasso Plattner Institute
+ * Copyright (c) 2017-2020 Software Architecture Group, Hasso Plattner Institute
  *
  * Licensed under the MIT License.
  */
@@ -95,6 +95,11 @@ public final class MiscUtils {
     @TruffleBoundary
     public static String getJavaClassPath() {
         return System.getProperty("java.class.path");
+    }
+
+    @TruffleBoundary
+    public static String getJavaHome() {
+        return System.getProperty("java.home");
     }
 
     @TruffleBoundary
