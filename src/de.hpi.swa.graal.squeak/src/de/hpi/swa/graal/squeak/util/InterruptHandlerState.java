@@ -11,7 +11,6 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import com.oracle.truffle.api.CompilerAsserts;
-import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -24,7 +23,7 @@ public final class InterruptHandlerState {
     private static final int INTERRUPT_CHECKS_EVERY_N_MILLISECONDS = 3;
 
     private final SqueakImageContext image;
-    private final ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1);
+    private ScheduledThreadPoolExecutor executor;
     private final ArrayDeque<Integer> semaphoresToSignal = new ArrayDeque<>();
 
     private boolean isActive = true;
@@ -44,12 +43,13 @@ public final class InterruptHandlerState {
     private PointersObject timerSemaphore;
     private ScheduledFuture<?> interruptChecks;
 
+    private int count;
+
     private InterruptHandlerState(final SqueakImageContext image) {
         this.image = image;
         if (image.options.disableInterruptHandler) {
             image.printToStdOut("Interrupt handler disabled...");
         }
-        executor.setRemoveOnCancelPolicy(true);
     }
 
     public static InterruptHandlerState create(final SqueakImageContext image) {
@@ -73,13 +73,18 @@ public final class InterruptHandlerState {
         } else {
             assert timerSema == NilObject.SINGLETON;
         }
-        interruptChecks = executor.scheduleWithFixedDelay(() -> shouldTrigger = true,
-                        INTERRUPT_CHECKS_EVERY_N_MILLISECONDS, INTERRUPT_CHECKS_EVERY_N_MILLISECONDS, TimeUnit.MILLISECONDS);
+        executor = new ScheduledThreadPoolExecutor(1);
+        executor.setRemoveOnCancelPolicy(true);
+        interruptChecks = executor.scheduleWithFixedDelay(() -> {
+            shouldTrigger = true;
+        }, INTERRUPT_CHECKS_EVERY_N_MILLISECONDS, INTERRUPT_CHECKS_EVERY_N_MILLISECONDS, TimeUnit.MILLISECONDS);
     }
 
     @TruffleBoundary
     public void shutdown() {
-        executor.shutdown();
+        if (executor != null) {
+            executor.shutdown();
+        }
     }
 
     public void setInterruptPending() {
@@ -87,7 +92,15 @@ public final class InterruptHandlerState {
     }
 
     public void setNextWakeupTick(final long msTime) {
+        LogUtils.INTERRUPTS.finer(() -> {
+            if (nextWakeupTick != 0) {
+                return (msTime != 0 ? "Changing nextWakeupTick to " + msTime + " from " : "Resetting nextWakeupTick from ") + nextWakeupTick + " after " + count + " checks";
+            } else {
+                return (msTime != 0 ? "Setting nextWakeupTick to " + msTime : "Resetting nextWakeupTick when it was already 0") + " after " + count + " checks";
+            }
+        });
         nextWakeupTick = msTime;
+        count = 0;
     }
 
     public long getNextWakeupTick() {
@@ -115,7 +128,15 @@ public final class InterruptHandlerState {
     }
 
     protected boolean nextWakeUpTickTrigger() {
-        return nextWakeupTick != 0 && System.currentTimeMillis() >= nextWakeupTick;
+        if (nextWakeupTick != 0) {
+            final long time = System.currentTimeMillis();
+            count++;
+            if (time >= nextWakeupTick) {
+                LogUtils.INTERRUPTS.finer(() -> "Reached nextWakeupTick: " + nextWakeupTick + " after " + count + " checks");
+                return true;
+            }
+        }
+        return false;
     }
 
     public void setPendingFinalizations(final boolean value) {
@@ -161,7 +182,6 @@ public final class InterruptHandlerState {
     }
 
     public void setInterruptSemaphore(final PointersObject interruptSemaphore) {
-        CompilerDirectives.transferToInterpreterAndInvalidate();
         this.interruptSemaphore = interruptSemaphore;
     }
 
@@ -181,9 +201,11 @@ public final class InterruptHandlerState {
         CompilerAsserts.neverPartOfCompilation("Resetting interrupt handler only supported for testing purposes");
         isActive = true;
         nextWakeupTick = 0;
+        count = 0;
         if (interruptChecks != null) {
             interruptChecks.cancel(true);
         }
+        shutdown();
         interruptPending = false;
         pendingFinalizationSignals = false;
         semaphoresToSignal.clear();

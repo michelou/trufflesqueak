@@ -5,15 +5,22 @@
  */
 package de.hpi.swa.graal.squeak.nodes.primitives.impl;
 
+import java.lang.management.ManagementFactory;
 import java.lang.ref.Reference;
 import java.lang.ref.ReferenceQueue;
-import java.lang.ref.WeakReference;
 import java.util.List;
 import java.util.logging.Level;
 
+import javax.management.InstanceNotFoundException;
+import javax.management.MBeanException;
+import javax.management.MBeanServer;
+import javax.management.MalformedObjectNameException;
+import javax.management.ObjectName;
+import javax.management.ReflectionException;
+
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.TruffleLogger;
+import com.oracle.truffle.api.TruffleOptions;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Cached.Shared;
 import com.oracle.truffle.api.dsl.GenerateNodeFactory;
@@ -26,6 +33,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.profiles.BranchProfile;
 
 import de.hpi.swa.graal.squeak.exceptions.PrimitiveExceptions.PrimitiveFailed;
+import de.hpi.swa.graal.squeak.exceptions.SqueakExceptions.SqueakException;
 import de.hpi.swa.graal.squeak.exceptions.SqueakExceptions.SqueakQuit;
 import de.hpi.swa.graal.squeak.model.AbstractSqueakObject;
 import de.hpi.swa.graal.squeak.model.AbstractSqueakObjectWithClassAndHash;
@@ -75,8 +83,8 @@ import de.hpi.swa.graal.squeak.nodes.process.ResumeProcessNode;
 import de.hpi.swa.graal.squeak.nodes.process.SignalSemaphoreNode;
 import de.hpi.swa.graal.squeak.nodes.process.WakeHighestPriorityNode;
 import de.hpi.swa.graal.squeak.nodes.process.YieldProcessNode;
-import de.hpi.swa.graal.squeak.shared.SqueakLanguageConfig;
 import de.hpi.swa.graal.squeak.util.InterruptHandlerNode;
+import de.hpi.swa.graal.squeak.util.LogUtils;
 import de.hpi.swa.graal.squeak.util.MiscUtils;
 import de.hpi.swa.graal.squeak.util.NotProvided;
 
@@ -523,7 +531,7 @@ public final class ControlPrimitives extends AbstractPrimitiveFactoryHolder {
              * acceptable because primitive is mostly used for debugging anyway.
              */
             final Object[] receiverAndArguments = getObjectArrayNode.executeWithFirst(argumentArray, receiver);
-            final AbstractPrimitiveNode primitiveNode = method.image.primitiveNodeFactory.forIndex(method, (int) primitiveIndex);
+            final AbstractPrimitiveNode primitiveNode = PrimitiveNodeFactory.forIndex(method, (int) primitiveIndex);
             if (primitiveNode == null) {
                 throw PrimitiveFailed.GENERIC_ERROR;
             } else {
@@ -550,7 +558,23 @@ public final class ControlPrimitives extends AbstractPrimitiveFactoryHolder {
     @GenerateNodeFactory
     @SqueakPrimitive(indices = 130)
     protected abstract static class PrimFullGCNode extends AbstractPrimitiveNode implements UnaryPrimitiveWithoutFallback {
-        private static final TruffleLogger LOG = TruffleLogger.getLogger(SqueakLanguageConfig.ID, PrimFullGCNode.class);
+        private static final MBeanServer SERVER = TruffleOptions.AOT ? null : ManagementFactory.getPlatformMBeanServer();
+        private static final String OPERATION_NAME = "gcRun";
+        private static final Object[] PARAMS = new Object[]{null};
+        private static final String[] SIGNATURE = new String[]{String[].class.getName()};
+        private static final ObjectName OBJECT_NAME;
+
+        static {
+            if (TruffleOptions.AOT) {
+                OBJECT_NAME = null;
+            } else {
+                try {
+                    OBJECT_NAME = new ObjectName("com.sun.management:type=DiagnosticCommand");
+                } catch (final MalformedObjectNameException e) {
+                    throw SqueakException.illegalState(e);
+                }
+            }
+        }
 
         protected PrimFullGCNode(final CompiledMethodObject method) {
             super(method);
@@ -558,7 +582,12 @@ public final class ControlPrimitives extends AbstractPrimitiveFactoryHolder {
 
         @Specialization
         protected final long doGC(@SuppressWarnings("unused") final Object receiver) {
-            forceFullGC();
+            if (TruffleOptions.AOT) {
+                /* System.gc() triggers full GC by default in SVM (see https://git.io/JvY7g). */
+                MiscUtils.systemGC();
+            } else {
+                forceFullGC();
+            }
             if (hasPendingFinalizations()) {
                 method.image.interrupt.setPendingFinalizations(true);
             }
@@ -566,16 +595,14 @@ public final class ControlPrimitives extends AbstractPrimitiveFactoryHolder {
         }
 
         /**
-         * {@link System#gc()} does not force a garbage collect, but it can be called until a new
-         * object has been GC'ed (Source: https://git.io/fjED4).
+         * {@link System#gc()} does not force a GC, but the DiagnosticCommand "gcRun" does.
          */
         @TruffleBoundary
-        public static void forceFullGC() {
-            Object obj = new Object();
-            final WeakReference<?> ref = new WeakReference<>(obj);
-            obj = null;
-            while (ref.get() != null) {
-                System.gc();
+        private static void forceFullGC() {
+            try {
+                SERVER.invoke(OBJECT_NAME, OPERATION_NAME, PARAMS, SIGNATURE);
+            } catch (InstanceNotFoundException | ReflectionException | MBeanException e) {
+                throw SqueakException.illegalState(e);
             }
         }
 
@@ -588,7 +615,7 @@ public final class ControlPrimitives extends AbstractPrimitiveFactoryHolder {
                 count++;
                 element = queue.poll();
             }
-            LOG.log(Level.FINE, "Number of garbage collected WeakPointersObjects", count);
+            LogUtils.GC.log(Level.FINE, "Number of garbage collected WeakPointersObjects: {0}", count);
             return count > 0;
         }
     }
@@ -842,7 +869,7 @@ public final class ControlPrimitives extends AbstractPrimitiveFactoryHolder {
              * It is non-trivial to avoid the creation of a primitive node here. Deopt might be
              * acceptable because primitive is mostly used for debugging anyway.
              */
-            final AbstractPrimitiveNode primitiveNode = method.image.primitiveNodeFactory.namedFor(methodObject);
+            final AbstractPrimitiveNode primitiveNode = PrimitiveNodeFactory.namedFor(methodObject);
             final Object[] receiverAndArguments = getObjectArrayNode.executeWithFirst(argumentArray, target);
             return replace(primitiveNode).executeWithArguments(frame, receiverAndArguments);
         }
@@ -859,7 +886,7 @@ public final class ControlPrimitives extends AbstractPrimitiveFactoryHolder {
         @Specialization
         protected static final Object doRelinquish(final VirtualFrame frame, final Object receiver, final long timeMicroseconds,
                         @Cached final StackPushForPrimitivesNode pushNode,
-                        @Cached("create(method)") final InterruptHandlerNode interruptNode) {
+                        @Cached("create(method, true)") final InterruptHandlerNode interruptNode) {
             MiscUtils.sleep(timeMicroseconds / 1000);
             /* Keep receiver on stack, interrupt handler could trigger. */
             pushNode.executeWrite(frame, receiver);

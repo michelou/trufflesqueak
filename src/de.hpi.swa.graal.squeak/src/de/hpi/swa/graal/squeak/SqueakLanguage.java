@@ -97,6 +97,7 @@ public final class SqueakLanguage extends TruffleLanguage<SqueakImageContext> {
 
     @Override
     protected Iterable<Scope> findLocalScopes(final SqueakImageContext context, final Node node, final Frame frame) {
+        // TODO: support access at parse time (frame == null).
         if (!FrameAccess.isGraalSqueakFrame(frame)) {
             return super.findLocalScopes(context, node, frame);
         }
@@ -116,6 +117,10 @@ public final class SqueakLanguage extends TruffleLanguage<SqueakImageContext> {
 
     public static SqueakImageContext getContext() {
         return getCurrentContext(SqueakLanguage.class);
+    }
+
+    public String getTruffleLanguageHome() {
+        return getLanguageHome();
     }
 
     @Override

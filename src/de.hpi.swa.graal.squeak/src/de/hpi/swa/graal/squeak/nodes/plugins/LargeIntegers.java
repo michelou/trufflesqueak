@@ -5,6 +5,7 @@
  */
 package de.hpi.swa.graal.squeak.nodes.plugins;
 
+import java.math.BigInteger;
 import java.util.List;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -30,7 +31,7 @@ import de.hpi.swa.graal.squeak.nodes.primitives.PrimitiveInterfaces.UnaryPrimiti
 import de.hpi.swa.graal.squeak.nodes.primitives.PrimitiveInterfaces.UnaryPrimitiveWithoutFallback;
 import de.hpi.swa.graal.squeak.nodes.primitives.SqueakPrimitive;
 import de.hpi.swa.graal.squeak.nodes.primitives.impl.ArithmeticPrimitives.AbstractArithmeticPrimitiveNode;
-import de.hpi.swa.graal.squeak.util.ArrayConversionUtils;
+import de.hpi.swa.graal.squeak.util.UnsafeUtils;
 
 public final class LargeIntegers extends AbstractPrimitiveFactoryHolder {
     private static final String MODULE_NAME = "LargeIntegers v2.0 (GraalSqueak)";
@@ -259,12 +260,12 @@ public final class LargeIntegers extends AbstractPrimitiveFactoryHolder {
         }
 
         @Specialization
-        protected static final LargeIntegerObject doLongLargeInteger(final long lhs, final LargeIntegerObject rhs) {
+        protected static final Object doLongLargeInteger(final long lhs, final LargeIntegerObject rhs) {
             return rhs.multiply(lhs);
         }
 
         @Specialization
-        protected static final LargeIntegerObject doLargeInteger(final LargeIntegerObject lhs, final LargeIntegerObject rhs) {
+        protected static final Object doLargeInteger(final LargeIntegerObject lhs, final LargeIntegerObject rhs) {
             return lhs.multiply(rhs);
         }
 
@@ -413,7 +414,7 @@ public final class LargeIntegers extends AbstractPrimitiveFactoryHolder {
                 final long value = rhs.longValue();
                 return value == lhs ? 0L : value < lhs ? -1L : 1L;
             } else {
-                return rhs.isNegative() ? -1L : 1L;
+                return rhs.isNegative() ? 1L : -1L;
             }
         }
 
@@ -432,46 +433,91 @@ public final class LargeIntegers extends AbstractPrimitiveFactoryHolder {
     @GenerateNodeFactory
     @SqueakPrimitive(names = "primDigitDivNegative")
     protected abstract static class PrimDigitDivNegativeNode extends AbstractArithmeticPrimitiveNode implements TernaryPrimitive {
-        private final BranchProfile signProfile = BranchProfile.create();
-
         protected PrimDigitDivNegativeNode(final CompiledMethodObject method) {
             super(method);
         }
 
-        @Specialization(rewriteOn = ArithmeticException.class)
-        protected final ArrayObject doLong(final long rcvr, final long arg, final boolean negative) {
+        @Specialization
+        protected final ArrayObject doLong(final long rcvr, final long arg, final boolean negative,
+                        @Cached final BranchProfile signProfile) {
             long divide = rcvr / arg;
             if (negative && divide >= 0 || !negative && divide < 0) {
                 signProfile.enter();
-                divide = Math.negateExact(divide);
+                if (divide == Long.MIN_VALUE) {
+                    return createArrayWithLongMinOverflowResult(rcvr, arg);
+                }
+                divide = -divide;
             }
             return method.image.asArrayOfLongs(divide, rcvr % arg);
         }
 
-        @Specialization
-        protected final ArrayObject doLongWithOverflow(final long rcvr, final long arg, final boolean negative) {
-            return doLargeInteger(asLargeInteger(rcvr), asLargeInteger(arg), negative);
+        @TruffleBoundary
+        private ArrayObject createArrayWithLongMinOverflowResult(final long rcvr, final long arg) {
+            return method.image.asArrayOfObjects(LargeIntegerObject.createLongMinOverflowResult(method.image), rcvr % arg);
         }
 
         @Specialization
+        @TruffleBoundary
         protected final ArrayObject doLargeInteger(final LargeIntegerObject rcvr, final LargeIntegerObject arg, final boolean negative) {
-            LargeIntegerObject divide = rcvr.divideNoReduce(arg);
-            if (negative != divide.isNegative()) {
-                signProfile.enter();
-                divide = divide.negate();
+            final BigInteger[] divide = rcvr.getBigInteger().divideAndRemainder(arg.getBigInteger());
+            final Object[] result = new Object[2];
+            if (negative != divide[0].signum() < 0) {
+                if (divide[0].bitLength() < Long.SIZE) {
+                    final long lresult = divide[0].longValue();
+                    if (lresult == Long.MIN_VALUE) {
+                        result[0] = LargeIntegerObject.createLongMinOverflowResult(method.image);
+                    } else {
+                        result[0] = -lresult;
+                    }
+                } else {
+                    result[0] = new LargeIntegerObject(method.image, divide[0].negate());
+                }
+            } else {
+                if (divide[0].bitLength() < Long.SIZE) {
+                    result[0] = divide[0].longValue();
+                } else {
+                    result[0] = new LargeIntegerObject(method.image, divide[0]);
+                }
             }
-            final Object remainder = rcvr.remainder(arg);
-            return method.image.asArrayOfObjects(divide.reduceIfPossible(), remainder);
+            if (divide[1].bitLength() < Long.SIZE) {
+                result[1] = divide[1].longValue();
+            } else {
+                result[1] = new LargeIntegerObject(method.image, divide[1]);
+            }
+            return method.image.asArrayOfObjects(result);
         }
 
         @Specialization
-        protected final ArrayObject doLong(final long rcvr, final LargeIntegerObject arg, final boolean negative) {
-            return doLargeInteger(asLargeInteger(rcvr), arg, negative);
+        protected final ArrayObject doLongLargeInteger(final long rcvr, final LargeIntegerObject arg, @SuppressWarnings("unused") final boolean negative) {
+            assert !arg.fitsIntoLong() : "non-reduced large integer!";
+            return method.image.asArrayOfLongs(0L, rcvr);
         }
 
         @Specialization
-        protected final ArrayObject doLargeInteger(final LargeIntegerObject rcvr, final long arg, final boolean negative) {
-            return doLargeInteger(rcvr, asLargeInteger(arg), negative);
+        @TruffleBoundary
+        protected final ArrayObject doLargeIntegerLong(final LargeIntegerObject rcvr, final long arg, final boolean negative) {
+            final BigInteger[] divide = rcvr.getBigInteger().divideAndRemainder(BigInteger.valueOf(arg));
+            final Object[] result = new Object[2];
+            if (negative != divide[0].signum() < 0) {
+                if (divide[0].bitLength() < Long.SIZE) {
+                    final long lresult = divide[0].longValue();
+                    if (lresult == Long.MIN_VALUE) {
+                        result[0] = LargeIntegerObject.createLongMinOverflowResult(method.image);
+                    } else {
+                        result[0] = -lresult;
+                    }
+                } else {
+                    result[0] = new LargeIntegerObject(method.image, divide[0].negate());
+                }
+            } else {
+                if (divide[0].bitLength() < Long.SIZE) {
+                    result[0] = divide[0].longValue();
+                } else {
+                    result[0] = new LargeIntegerObject(method.image, divide[0]);
+                }
+            }
+            result[1] = divide[1].longValue();
+            return method.image.asArrayOfObjects(result);
         }
     }
 
@@ -576,13 +622,10 @@ public final class LargeIntegers extends AbstractPrimitiveFactoryHolder {
         @Specialization
         @TruffleBoundary
         protected final Object doLargeInteger(final LargeIntegerObject receiver, final LargeIntegerObject a, final LargeIntegerObject m, final long mInv) {
-            final int[] firstInts = ArrayConversionUtils.intsFromBytesExact(receiver.getBytes());
-            final int[] secondInts = ArrayConversionUtils.intsFromBytesExact(a.getBytes());
-            final int[] thirdInts = ArrayConversionUtils.intsFromBytesExact(m.getBytes());
-            return montgomeryTimesModulo(firstInts, secondInts, thirdInts, mInv);
-        }
+            final int[] firstInts = UnsafeUtils.toIntsExact(receiver.getBytes());
+            final int[] secondInts = UnsafeUtils.toIntsExact(a.getBytes());
+            final int[] thirdInts = UnsafeUtils.toIntsExact(m.getBytes());
 
-        private Object montgomeryTimesModulo(final int[] firstInts, final int[] secondInts, final int[] thirdInts, final long mInv) {
             final int firstLen = firstInts.length;
             final int secondLen = secondInts.length;
             final int thirdLen = thirdInts.length;
@@ -646,7 +689,7 @@ public final class LargeIntegers extends AbstractPrimitiveFactoryHolder {
                     accum = 0 - (accum >> 63);
                 }
             }
-            final byte[] resultBytes = ArrayConversionUtils.bytesFromInts(result);
+            final byte[] resultBytes = UnsafeUtils.toBytes(result);
             return new LargeIntegerObject(method.image, method.image.largePositiveIntegerClass, resultBytes).reduceIfPossible(); // normalize
         }
 

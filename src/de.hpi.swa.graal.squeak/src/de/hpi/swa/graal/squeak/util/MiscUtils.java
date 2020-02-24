@@ -11,10 +11,12 @@ import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.RuntimeMXBean;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Properties;
+import java.util.Random;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -32,11 +34,13 @@ public final class MiscUtils {
     public static final long TIME_ZONE_OFFSET_MICROSECONDS = (Calendar.getInstance().get(Calendar.ZONE_OFFSET) + Calendar.getInstance().get(Calendar.DST_OFFSET)) * 1000L;
     public static final long TIME_ZONE_OFFSET_SECONDS = TIME_ZONE_OFFSET_MICROSECONDS / 1000 / 1000;
 
+    public static final Random RANDOM = new Random();
+
     private MiscUtils() {
     }
 
-    public static int bitSplit(final long value, final int offset, final int length) {
-        return (int) (value >> offset & (1 << length) - 1);
+    public static int bitSplit(final long value, final int offset, final int size) {
+        return (int) (value >> offset & size - 1);
     }
 
     /** Ceil version of {@link Math#floorDiv(int, int)}. */
@@ -50,6 +54,11 @@ public final class MiscUtils {
     }
 
     @TruffleBoundary
+    public static long currentTimeMillis() {
+        return System.currentTimeMillis();
+    }
+
+    @TruffleBoundary
     public static String format(final String format, final Object... args) {
         return String.format(format, args);
     }
@@ -58,7 +67,7 @@ public final class MiscUtils {
     public static long getCollectionCount() {
         long totalCollectionCount = 0;
         for (final GarbageCollectorMXBean gcBean : GC_BEANS) {
-            totalCollectionCount += Math.min(gcBean.getCollectionCount(), 0);
+            totalCollectionCount += Math.max(gcBean.getCollectionCount(), 0);
         }
         return totalCollectionCount;
     }
@@ -67,7 +76,7 @@ public final class MiscUtils {
     public static long getCollectionTime() {
         long totalCollectionTime = 0;
         for (final GarbageCollectorMXBean gcBean : GC_BEANS) {
-            totalCollectionTime += Math.min(gcBean.getCollectionTime(), 0);
+            totalCollectionTime += Math.max(gcBean.getCollectionTime(), 0);
         }
         return totalCollectionTime;
     }
@@ -175,6 +184,16 @@ public final class MiscUtils {
             Thread.currentThread().interrupt();
             throw new SqueakInterrupt();
         }
+    }
+
+    @TruffleBoundary
+    public static byte[] stringToBytes(final String value) {
+        return value.getBytes(StandardCharsets.UTF_8);
+    }
+
+    @TruffleBoundary
+    public static int[] stringToCodePointsArray(final String value) {
+        return value.codePoints().toArray();
     }
 
     @TruffleBoundary

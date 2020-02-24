@@ -5,11 +5,8 @@
  */
 package de.hpi.swa.graal.squeak.nodes;
 
-import java.util.logging.Level;
-
 import com.oracle.truffle.api.CompilerAsserts;
 import com.oracle.truffle.api.CompilerDirectives;
-import com.oracle.truffle.api.TruffleLogger;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.instrumentation.GenerateWrapper;
 import com.oracle.truffle.api.instrumentation.InstrumentableNode;
@@ -36,18 +33,18 @@ import de.hpi.swa.graal.squeak.nodes.bytecodes.PushBytecodes.PushClosureNode;
 import de.hpi.swa.graal.squeak.nodes.bytecodes.ReturnBytecodes.AbstractReturnNode;
 import de.hpi.swa.graal.squeak.nodes.bytecodes.SendBytecodes.AbstractSendNode;
 import de.hpi.swa.graal.squeak.nodes.context.frame.FrameStackInitializationNode;
-import de.hpi.swa.graal.squeak.shared.SqueakLanguageConfig;
+import de.hpi.swa.graal.squeak.util.ArrayUtils;
 import de.hpi.swa.graal.squeak.util.FrameAccess;
-import de.hpi.swa.graal.squeak.util.InterruptByUserHandlerNode;
+import de.hpi.swa.graal.squeak.util.InterruptHandlerNode;
+import de.hpi.swa.graal.squeak.util.LogUtils;
 import de.hpi.swa.graal.squeak.util.SqueakBytecodeDecoder;
 
 @GenerateWrapper
 public class ExecuteContextNode extends AbstractNodeWithCode implements InstrumentableNode {
-    private static final TruffleLogger LOG = TruffleLogger.getLogger(SqueakLanguageConfig.ID, CallPrimitiveNode.class);
     private static final boolean DECODE_BYTECODE_ON_DEMAND = true;
     private static final int STACK_DEPTH_LIMIT = 25000;
-    private static final int LOCAL_RETURN_PC = -1;
-    private static final int MIN_NUMBER_OF_BYTECODE_FOR_USER_INTERRUPT_CHECKS = 32;
+    private static final int LOCAL_RETURN_PC = -2;
+    private static final int MIN_NUMBER_OF_BYTECODE_FOR_INTERRUPT_CHECKS = 32;
 
     @Children private AbstractBytecodeNode[] bytecodeNodes;
     @Child private HandleNonLocalReturnNode handleNonLocalReturnNode;
@@ -55,7 +52,7 @@ public class ExecuteContextNode extends AbstractNodeWithCode implements Instrume
 
     @Child private FrameStackInitializationNode frameInitializationNode;
     @Child private HandlePrimitiveFailedNode handlePrimitiveFailedNode;
-    @Child private InterruptByUserHandlerNode interruptByUserHandlerNode;
+    @Child private InterruptHandlerNode interruptHandlerNode;
     @Child private MaterializeContextOnMethodExitNode materializeContextOnMethodExitNode;
 
     private SourceSection section;
@@ -68,8 +65,13 @@ public class ExecuteContextNode extends AbstractNodeWithCode implements Instrume
             bytecodeNodes = SqueakBytecodeDecoder.decode(code);
         }
         frameInitializationNode = resume ? null : FrameStackInitializationNode.create(code);
-        /* Only check for user interrupts if method is relatively large. */
-        interruptByUserHandlerNode = bytecodeNodes.length >= MIN_NUMBER_OF_BYTECODE_FOR_USER_INTERRUPT_CHECKS ? InterruptByUserHandlerNode.create(code) : null;
+        /*
+         * Only check for interrupts if method is relatively large. Also, skip timer interrupts here
+         * as they trigger too often, which causes a lot of context switches and therefore
+         * materialization and deopts. Timer inputs are currently handled in
+         * primitiveRelinquishProcessor (#230) only.
+         */
+        interruptHandlerNode = bytecodeNodes.length >= MIN_NUMBER_OF_BYTECODE_FOR_INTERRUPT_CHECKS ? InterruptHandlerNode.create(code, false) : null;
         materializeContextOnMethodExitNode = resume ? null : MaterializeContextOnMethodExitNode.create(code);
     }
 
@@ -96,10 +98,10 @@ public class ExecuteContextNode extends AbstractNodeWithCode implements Instrume
                 context.setProcess(code.image.getActiveProcess(AbstractPointersObjectReadNode.getUncached()));
                 throw ProcessSwitch.createWithBoundary(context);
             }
-            if (interruptByUserHandlerNode != null) {
-                interruptByUserHandlerNode.executeCheckForUserInterrupts(frame);
-            }
             frameInitializationNode.executeInitialize(frame);
+            if (interruptHandlerNode != null) {
+                interruptHandlerNode.executeTrigger(frame);
+            }
             return startBytecode(frame);
         } catch (final NonLocalReturn nlr) {
             /** {@link getHandleNonLocalReturnNode()} acts as {@link BranchProfile} */
@@ -163,19 +165,39 @@ public class ExecuteContextNode extends AbstractNodeWithCode implements Instrume
             CompilerAsserts.partialEvaluationConstant(pc);
             final AbstractBytecodeNode node = fetchNextBytecodeNode(pc);
             if (node instanceof CallPrimitiveNode) {
-                final CallPrimitiveNode callPrimitiveNode = (CallPrimitiveNode) fetchNextBytecodeNode(0);
+                final CallPrimitiveNode callPrimitiveNode = (CallPrimitiveNode) node;
                 if (callPrimitiveNode.primitiveNode != null) {
                     try {
                         return callPrimitiveNode.primitiveNode.executePrimitive(frame);
                     } catch (final PrimitiveFailed e) {
                         getHandlePrimitiveFailedNode().executeHandle(frame, e.getReasonCode());
-                        LOG.log(Level.FINE, () -> "Failed primitive " + callPrimitiveNode.primitiveNode.getClass().getName());
+                        /*
+                         * Same toString() methods may throw compilation warnings, this is expected
+                         * and ok for primitive failure logging purposes.
+                         */
+                        LogUtils.PRIMITIVES.fine(() -> callPrimitiveNode.primitiveNode.getClass().getSimpleName() + " failed (arguments: " +
+                                        ArrayUtils.toJoinedString(", ", FrameAccess.getReceiverAndArguments(frame)) + ")");
                         /* continue with fallback code. */
                     }
                 }
                 pc = callPrimitiveNode.getSuccessorIndex();
                 assert pc == CallPrimitiveNode.NUM_BYTECODES;
                 continue;
+            } else if (node instanceof AbstractSendNode) {
+                pc = node.getSuccessorIndex();
+                FrameAccess.setInstructionPointer(frame, code, pc);
+                node.executeVoid(frame);
+                final int actualNextPc = FrameAccess.getInstructionPointer(frame, code);
+                if (pc != actualNextPc) {
+                    /*
+                     * pc has changed, which can happen if a context is restarted (e.g. as part of
+                     * Exception>>retry). For now, we continue in the interpreter to avoid confusing
+                     * the Graal compiler.
+                     */
+                    CompilerDirectives.transferToInterpreter();
+                    pc = actualNextPc;
+                }
+                continue bytecode_loop;
             } else if (node instanceof ConditionalJumpNode) {
                 final ConditionalJumpNode jumpNode = (ConditionalJumpNode) node;
                 if (jumpNode.executeCondition(frame)) {
@@ -210,10 +232,8 @@ public class ExecuteContextNode extends AbstractNodeWithCode implements Instrume
                 pc = pushClosureNode.getClosureSuccessorIndex();
                 continue bytecode_loop;
             } else {
+                /* All other bytecode nodes. */
                 pc = node.getSuccessorIndex();
-                if (node instanceof AbstractSendNode) {
-                    FrameAccess.setInstructionPointer(frame, code, pc);
-                }
                 node.executeVoid(frame);
                 continue bytecode_loop;
             }
@@ -234,7 +254,7 @@ public class ExecuteContextNode extends AbstractNodeWithCode implements Instrume
     }
 
     /*
-     * Non-optimized version of startBytecode which is used to resume contexts.
+     * Non-optimized version of startBytecode used to resume contexts.
      */
     private Object resumeBytecode(final VirtualFrame frame, final long initialPC) {
         assert initialPC > 0 : "Trying to resume a fresh/terminated/illegal context";
@@ -242,7 +262,22 @@ public class ExecuteContextNode extends AbstractNodeWithCode implements Instrume
         Object returnValue = null;
         bytecode_loop_slow: while (pc != LOCAL_RETURN_PC) {
             final AbstractBytecodeNode node = fetchNextBytecodeNode(pc);
-            if (node instanceof ConditionalJumpNode) {
+            if (node instanceof AbstractSendNode) {
+                pc = node.getSuccessorIndex();
+                FrameAccess.setInstructionPointer(frame, code, pc);
+                node.executeVoid(frame);
+                final int actualNextPc = FrameAccess.getInstructionPointer(frame, code);
+                if (pc != actualNextPc) {
+                    /*
+                     * pc has changed, which can happen if a context is restarted (e.g. as part of
+                     * Exception>>retry). For now, we continue in the interpreter to avoid confusing
+                     * the Graal compiler.
+                     */
+                    CompilerDirectives.transferToInterpreter();
+                    pc = actualNextPc;
+                }
+                continue bytecode_loop_slow;
+            } else if (node instanceof ConditionalJumpNode) {
                 final ConditionalJumpNode jumpNode = (ConditionalJumpNode) node;
                 if (jumpNode.executeCondition(frame)) {
                     pc = jumpNode.getJumpSuccessorIndex();
@@ -264,10 +299,8 @@ public class ExecuteContextNode extends AbstractNodeWithCode implements Instrume
                 pc = pushClosureNode.getClosureSuccessorIndex();
                 continue bytecode_loop_slow;
             } else {
+                /* All other bytecode nodes. */
                 final int successor = node.getSuccessorIndex();
-                if (node instanceof AbstractSendNode) {
-                    FrameAccess.setInstructionPointer(frame, code, successor);
-                }
                 node.executeVoid(frame);
                 pc = successor;
                 continue bytecode_loop_slow;

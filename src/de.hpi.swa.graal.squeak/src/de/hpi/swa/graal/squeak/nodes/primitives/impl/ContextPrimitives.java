@@ -147,15 +147,17 @@ public class ContextPrimitives extends AbstractPrimitiveFactoryHolder {
         private void terminateBetween(final ContextObject start, final ContextObject end) {
             ContextObject current = start;
             while (current.hasMaterializedSender()) {
-                final AbstractSqueakObject sender = start.getSender();
-                current.terminate();
+                final AbstractSqueakObject sender = current.getSender();
+                if (current != start) {
+                    current.terminate();
+                }
                 if (sender == NilObject.SINGLETON || sender == end) {
                     return;
                 } else {
                     current = (ContextObject) sender;
                 }
             }
-            terminateBetween(current.getFrameMarker(), end);
+            terminateBetween((FrameMarker) current.getFrameSender(), end);
         }
 
         private void terminateBetween(final FrameMarker start, final ContextObject end) {

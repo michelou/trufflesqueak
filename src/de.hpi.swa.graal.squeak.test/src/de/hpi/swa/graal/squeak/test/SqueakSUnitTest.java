@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import org.junit.Assume;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -64,6 +65,8 @@ public class SqueakSUnitTest extends AbstractSqueakTestCaseWithImage {
 
     protected static final List<SqueakTest> TESTS = selectTestsToRun().collect(toList());
 
+    private static boolean graalSqueakPackagesLoaded = false;
+
     @Parameter public SqueakTest test;
 
     @Parameters(name = "{0} (#{index})")
@@ -77,6 +80,13 @@ public class SqueakSUnitTest extends AbstractSqueakTestCaseWithImage {
             return SqueakTests.getTestsToRun(toRun);
         }
         return SqueakTests.allTests();
+    }
+
+    @Before
+    public void loadPackagesOnDemand() throws Throwable {
+        if (inGraalSqueakPackage(test.className)) {
+            ensureGraalSqueakPackagesLoaded();
+        }
     }
 
     @Test
@@ -164,5 +174,34 @@ public class SqueakSUnitTest extends AbstractSqueakTestCaseWithImage {
         } else {
             assertFalse(result.message, result.passed);
         }
+    }
+
+    protected static final boolean inGraalSqueakPackage(final String className) {
+        for (final String testCaseName : GRAALSQUEAK_TEST_CASE_NAMES) {
+            if (testCaseName.equals(className)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    protected static final void ensureGraalSqueakPackagesLoaded() {
+        if (graalSqueakPackagesLoaded) {
+            return;
+        }
+        graalSqueakPackagesLoaded = true;
+        final long start = System.currentTimeMillis();
+        image.getOutput().println("Loading GraalSqueak packages. This may take a while...");
+        evaluate(String.format("[Metacello new\n" +
+                        "  baseline: 'GraalSqueak';\n" +
+                        "  repository: 'filetree://%s';\n" +
+                        "  onConflict: [:ex | ex allow];\n" +
+                        "  load: #('tests')] on: ProgressInitiationException do: [:e |\n" +
+                        "            e isNested\n" +
+                        "                ifTrue: [e pass]\n" +
+                        "                ifFalse: [e rearmHandlerDuring:\n" +
+                        "                    [[e sendNotificationsTo: [:min :max :current | \"silence\"]]\n" +
+                        "                        on: ProgressNotification do: [:notification | notification resume]]]]", getPathToInImageCode()));
+        image.getOutput().println("GraalSqueak packages loaded in " + ((double) System.currentTimeMillis() - start) / 1000 + "s.");
     }
 }

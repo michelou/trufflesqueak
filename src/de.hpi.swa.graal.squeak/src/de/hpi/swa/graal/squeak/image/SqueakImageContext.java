@@ -29,7 +29,6 @@ import de.hpi.swa.graal.squeak.SqueakImage;
 import de.hpi.swa.graal.squeak.SqueakLanguage;
 import de.hpi.swa.graal.squeak.SqueakOptions.SqueakContextOptions;
 import de.hpi.swa.graal.squeak.exceptions.SqueakExceptions.SqueakException;
-import de.hpi.swa.graal.squeak.image.reading.SqueakImageReader;
 import de.hpi.swa.graal.squeak.interop.InteropMap;
 import de.hpi.swa.graal.squeak.interop.LookupMethodByStringNode;
 import de.hpi.swa.graal.squeak.io.DisplayPoint;
@@ -65,9 +64,9 @@ import de.hpi.swa.graal.squeak.nodes.plugins.JPEGReader;
 import de.hpi.swa.graal.squeak.nodes.plugins.SqueakSSL.SqSSL;
 import de.hpi.swa.graal.squeak.nodes.plugins.Zip;
 import de.hpi.swa.graal.squeak.nodes.plugins.network.SqueakSocket;
-import de.hpi.swa.graal.squeak.nodes.primitives.PrimitiveNodeFactory;
+import de.hpi.swa.graal.squeak.shared.SqueakImageLocator;
 import de.hpi.swa.graal.squeak.shared.SqueakLanguageConfig;
-import de.hpi.swa.graal.squeak.util.ArrayConversionUtils;
+import de.hpi.swa.graal.squeak.tools.SqueakMessageInterceptor;
 import de.hpi.swa.graal.squeak.util.ArrayUtils;
 import de.hpi.swa.graal.squeak.util.FrameAccess;
 import de.hpi.swa.graal.squeak.util.InterruptHandlerState;
@@ -114,15 +113,17 @@ public final class SqueakImageContext {
 
     /* System Information */
     public final SqueakImageFlags flags = new SqueakImageFlags();
-    @CompilationFinal private String imagePath;
+    private String imagePath;
+    private String resourcesPath;
     @CompilationFinal private boolean isHeadless;
     public final SqueakContextOptions options;
 
     /* System */
     private boolean currentMarkingFlag;
+    private ArrayObject hiddenRoots;
+    private long globalClassCounter = -1;
     @CompilationFinal private SqueakDisplayInterface display;
     public final InterruptHandlerState interrupt;
-    public final PrimitiveNodeFactory primitiveNodeFactory = new PrimitiveNodeFactory();
     public final long startUpMillis = System.currentTimeMillis();
     public final ReferenceQueue<Object> weakPointersQueue = new ReferenceQueue<>();
 
@@ -168,13 +169,14 @@ public final class SqueakImageContext {
         isHeadless = options.isHeadless;
         interrupt = InterruptHandlerState.create(this);
         allocationReporter = env.lookup(AllocationReporter.class);
+        SqueakMessageInterceptor.enableIfRequested(environment);
     }
 
     public void ensureLoaded() {
         if (!loaded()) {
             // Load image.
             SqueakImageReader.load(this);
-            getOutput().println("Preparing image for headless execution...");
+            printToStdOut("Preparing image for headless execution...");
             // Remove active context.
             getActiveProcessSlow().instVarAtPut0Slow(PROCESS.SUSPENDED_CONTEXT, NilObject.SINGLETON);
             // Modify StartUpList for headless execution.
@@ -289,6 +291,23 @@ public final class SqueakImageContext {
         return currentMarkingFlag = !currentMarkingFlag;
     }
 
+    public ArrayObject getHiddenRoots() {
+        return hiddenRoots;
+    }
+
+    public long getGlobalClassCounter() {
+        return globalClassCounter;
+    }
+
+    public void setGlobalClassCounter(final long newValue) {
+        assert globalClassCounter < 0 : "globalClassCounter should only be set once";
+        globalClassCounter = newValue;
+    }
+
+    public long getNextClassHash() {
+        return ++globalClassCounter;
+    }
+
     public NativeObject getDebugErrorSelector() {
         return debugErrorSelector;
     }
@@ -369,19 +388,24 @@ public final class SqueakImageContext {
         SlotLocation.initialize();
     }
 
-    public void initializeAfterLoadingImage() {
-        primitiveNodeFactory.initialize(this);
-    }
-
-    public ClassObject initializeForeignObject() {
-        CompilerDirectives.transferToInterpreterAndInvalidate();
-        foreignObjectClass = new ClassObject(this);
-        return foreignObjectClass;
+    public void initializeAfterLoadingImage(final ArrayObject theHiddenRoots) {
+        assert hiddenRoots == null;
+        hiddenRoots = theHiddenRoots;
     }
 
     public ClassObject getForeignObjectClass() {
         assert foreignObjectClass != null;
         return foreignObjectClass;
+    }
+
+    public boolean setForeignObjectClass(final ClassObject classObject) {
+        if (foreignObjectClass == null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            foreignObjectClass = classObject;
+            return true;
+        } else {
+            return false;
+        }
     }
 
     public boolean supportsNFI() {
@@ -438,20 +462,32 @@ public final class SqueakImageContext {
         return display;
     }
 
+    public String getResourcesDirectory() {
+        if (resourcesPath == null) {
+            CompilerDirectives.transferToInterpreter();
+            final String languageHome = language.getTruffleLanguageHome();
+            if (languageHome != null) {
+                resourcesPath = Paths.get(language.getTruffleLanguageHome()).resolve("resources").toString();
+            } else { /* Fallback to image directory. */
+                resourcesPath = getImageDirectory();
+            }
+        }
+        return resourcesPath;
+    }
+
     public String imageRelativeFilePathFor(final String fileName) {
         return getImageDirectory() + File.separator + fileName;
     }
 
     public String getImagePath() {
         if (imagePath == null) {
-            assert !options.imagePath.isEmpty();
-            setImagePath(options.imagePath);
+            CompilerDirectives.transferToInterpreter();
+            setImagePath(options.imagePath.isEmpty() ? SqueakImageLocator.findImage() : options.imagePath);
         }
         return imagePath;
     }
 
     public void setImagePath(final String path) {
-        CompilerDirectives.transferToInterpreterAndInvalidate();
         imagePath = path;
     }
 
@@ -519,11 +555,11 @@ public final class SqueakImageContext {
     }
 
     public NativeObject asByteString(final String value) {
-        return NativeObject.newNativeBytes(this, byteStringClass, ArrayConversionUtils.stringToBytes(value));
+        return NativeObject.newNativeBytes(this, byteStringClass, MiscUtils.stringToBytes(value));
     }
 
     public NativeObject asWideString(final String value) {
-        return NativeObject.newNativeInts(this, getWideStringClass(), ArrayConversionUtils.stringToCodePointsArray(value));
+        return NativeObject.newNativeInts(this, getWideStringClass(), MiscUtils.stringToCodePointsArray(value));
     }
 
     public NativeObject asString(final String value, final ConditionProfile wideStringProfile) {

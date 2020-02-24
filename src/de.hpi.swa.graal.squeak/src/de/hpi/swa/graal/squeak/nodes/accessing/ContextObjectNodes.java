@@ -23,7 +23,6 @@ import de.hpi.swa.graal.squeak.nodes.context.frame.FrameSlotWriteNode;
 import de.hpi.swa.graal.squeak.util.FrameAccess;
 
 public final class ContextObjectNodes {
-
     @GenerateUncached
     @ImportStatic(CONTEXT.class)
     public abstract static class ContextObjectReadNode extends AbstractNode {
@@ -38,8 +37,7 @@ public final class ContextObjectNodes {
         @Specialization(guards = {"index == INSTRUCTION_POINTER"})
         protected static final Object doInstructionPointer(final ContextObject context, @SuppressWarnings("unused") final long index,
                         @Cached("createBinaryProfile()") final ConditionProfile nilProfile) {
-            final long pc = context.getInstructionPointer(); // Must be a long.
-            return nilProfile.profile(pc < 0) ? NilObject.SINGLETON : pc;
+            return context.getInstructionPointer(nilProfile);
         }
 
         @Specialization(guards = "index == STACKPOINTER")
@@ -108,7 +106,7 @@ public final class ContextObjectNodes {
         @SuppressWarnings("unused")
         @Specialization(guards = {"index == INSTRUCTION_POINTER"})
         protected static final void doInstructionPointerTerminated(final ContextObject context, final long index, final NilObject value) {
-            context.setInstructionPointer(-1);
+            context.removeInstructionPointer();
         }
 
         @Specialization(guards = "index == STACKPOINTER")

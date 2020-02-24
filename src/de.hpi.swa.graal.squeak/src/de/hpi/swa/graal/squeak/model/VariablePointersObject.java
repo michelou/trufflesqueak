@@ -10,13 +10,15 @@ import java.util.Arrays;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.profiles.ConditionProfile;
 
+import de.hpi.swa.graal.squeak.image.SqueakImageChunk;
 import de.hpi.swa.graal.squeak.image.SqueakImageContext;
-import de.hpi.swa.graal.squeak.image.reading.SqueakImageChunk;
+import de.hpi.swa.graal.squeak.image.SqueakImageWriter;
 import de.hpi.swa.graal.squeak.nodes.ObjectGraphNode.ObjectTracer;
 import de.hpi.swa.graal.squeak.nodes.accessing.AbstractPointersObjectNodes.AbstractPointersObjectWriteNode;
 import de.hpi.swa.graal.squeak.nodes.accessing.SqueakObjectIdentityNode;
 import de.hpi.swa.graal.squeak.nodes.accessing.UpdateSqueakObjectHashNode;
 import de.hpi.swa.graal.squeak.util.ArrayUtils;
+import de.hpi.swa.graal.squeak.util.UnsafeUtils;
 
 public final class VariablePointersObject extends AbstractPointersObject {
     @CompilationFinal(dimensions = 0) private Object[] variablePart;
@@ -90,11 +92,11 @@ public final class VariablePointersObject extends AbstractPointersObject {
     }
 
     public Object getFromVariablePart(final int index) {
-        return variablePart[index];
+        return UnsafeUtils.getObject(variablePart, index);
     }
 
     public void putIntoVariablePart(final int index, final Object value) {
-        variablePart[index] = value;
+        UnsafeUtils.putObject(variablePart, index, value);
     }
 
     public VariablePointersObject shallowCopy() {
@@ -105,6 +107,23 @@ public final class VariablePointersObject extends AbstractPointersObject {
         super.traceLayoutObjects(tracer);
         for (final Object object : variablePart) {
             tracer.addIfUnmarked(object);
+        }
+    }
+
+    @Override
+    public void trace(final SqueakImageWriter writerNode) {
+        super.trace(writerNode);
+        for (final Object object : variablePart) {
+            writerNode.traceIfNecessary(object);
+        }
+    }
+
+    @Override
+    public void write(final SqueakImageWriter writerNode) {
+        if (super.writeHeaderAndLayoutObjects(writerNode)) {
+            for (final Object object : variablePart) {
+                writerNode.writeObject(object);
+            }
         }
     }
 }

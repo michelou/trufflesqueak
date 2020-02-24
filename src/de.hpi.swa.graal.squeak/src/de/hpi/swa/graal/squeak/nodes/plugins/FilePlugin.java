@@ -51,9 +51,9 @@ import de.hpi.swa.graal.squeak.nodes.primitives.PrimitiveInterfaces.TernaryPrimi
 import de.hpi.swa.graal.squeak.nodes.primitives.PrimitiveInterfaces.UnaryPrimitiveWithoutFallback;
 import de.hpi.swa.graal.squeak.nodes.primitives.SqueakPrimitive;
 import de.hpi.swa.graal.squeak.shared.SqueakLanguageConfig;
-import de.hpi.swa.graal.squeak.util.ArrayConversionUtils;
 import de.hpi.swa.graal.squeak.util.MiscUtils;
 import de.hpi.swa.graal.squeak.util.OSDetector;
+import de.hpi.swa.graal.squeak.util.UnsafeUtils;
 
 public final class FilePlugin extends AbstractPrimitiveFactoryHolder {
     private static final TruffleLogger LOG = TruffleLogger.getLogger(SqueakLanguageConfig.ID, FilePlugin.class);
@@ -505,13 +505,13 @@ public final class FilePlugin extends AbstractPrimitiveFactoryHolder {
                         final long startIndex, final long longCount,
                         @Exclusive @Cached final BranchProfile errorProfile) {
             final int count = (int) longCount;
-            final ByteBuffer dst = allocate(count * ArrayConversionUtils.INTEGER_BYTE_SIZE);
+            final ByteBuffer dst = allocate(count * Integer.BYTES);
             try {
                 final long readBytes = readFrom(fileDescriptor, dst);
-                assert readBytes % ArrayConversionUtils.INTEGER_BYTE_SIZE == 0;
-                final long readInts = readBytes / ArrayConversionUtils.INTEGER_BYTE_SIZE;
+                assert readBytes % Integer.BYTES == 0;
+                final long readInts = readBytes / Integer.BYTES;
                 for (int index = 0; index < readInts; index++) {
-                    final int offset = index * ArrayConversionUtils.INTEGER_BYTE_SIZE;
+                    final int offset = index * Integer.BYTES;
                     target.getIntStorage()[(int) (startIndex - 1 + index)] = getFromUnsigned(dst, offset + 3) << 24 |
                                     getFromUnsigned(dst, offset + 2) << 16 |
                                     getFromUnsigned(dst, offset + 1) << 8 |
@@ -691,7 +691,14 @@ public final class FilePlugin extends AbstractPrimitiveFactoryHolder {
         @TruffleBoundary(transferToInterpreterOnException = false)
         protected final long doWriteInt(@SuppressWarnings("unused") final Object receiver, final long fileDescriptor, final NativeObject content, final long startIndex,
                         final long count) {
-            return fileWriteFromAt(fileDescriptor, count, ArrayConversionUtils.bytesFromIntsReversed(content.getIntStorage()), startIndex, 4);
+            // TODO: use ByteBuffer or UnsafeUtils here?
+            final int[] ints = content.getIntStorage();
+            final int intsLength = ints.length;
+            final byte[] bytes = new byte[intsLength * Integer.BYTES];
+            for (int i = 0; i < intsLength; i++) {
+                UnsafeUtils.putIntReversed(bytes, i, ints[i]);
+            }
+            return fileWriteFromAt(fileDescriptor, count, bytes, startIndex, 4);
         }
 
         @Specialization(guards = {"!isStdioFileDescriptor(fileDescriptor)", "inBounds(startIndex, count, content.size())"})

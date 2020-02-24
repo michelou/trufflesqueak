@@ -28,12 +28,13 @@ import com.oracle.truffle.api.profiles.ConditionProfile;
 
 import de.hpi.swa.graal.squeak.exceptions.PrimitiveExceptions.PrimitiveFailed;
 import de.hpi.swa.graal.squeak.exceptions.SqueakExceptions.SqueakException;
+import de.hpi.swa.graal.squeak.image.SqueakImageChunk;
+import de.hpi.swa.graal.squeak.image.SqueakImageConstants;
 import de.hpi.swa.graal.squeak.image.SqueakImageContext;
-import de.hpi.swa.graal.squeak.image.reading.SqueakImageChunk;
+import de.hpi.swa.graal.squeak.image.SqueakImageWriter;
 import de.hpi.swa.graal.squeak.interop.WrapToSqueakNode;
 import de.hpi.swa.graal.squeak.nodes.accessing.NativeObjectNodes.NativeObjectSizeNode;
 import de.hpi.swa.graal.squeak.nodes.accessing.NativeObjectNodes.NativeObjectWriteNode;
-import de.hpi.swa.graal.squeak.util.ArrayConversionUtils;
 import de.hpi.swa.graal.squeak.util.ArrayUtils;
 import de.hpi.swa.graal.squeak.util.UnsafeUtils;
 
@@ -43,6 +44,9 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
     public static final short BYTE_MAX = (short) (Math.pow(2, Byte.SIZE) - 1);
     public static final int SHORT_MAX = (int) (Math.pow(2, Short.SIZE) - 1);
     public static final long INTEGER_MAX = (long) (Math.pow(2, Integer.SIZE) - 1);
+    public static final int BYTE_TO_WORD = Long.SIZE / Byte.SIZE;
+    public static final int SHORT_TO_WORD = Long.SIZE / Short.SIZE;
+    public static final int INTEGER_TO_WORD = Long.SIZE / Integer.SIZE;
 
     @CompilationFinal private Object storage;
 
@@ -81,7 +85,7 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
     }
 
     public static NativeObject newNativeInts(final SqueakImageChunk chunk) {
-        return new NativeObject(chunk.getImage(), chunk.getHash(), chunk.getSqClass(), ArrayConversionUtils.intsFromBytes(chunk.getBytes()));
+        return new NativeObject(chunk.getImage(), chunk.getHash(), chunk.getSqClass(), UnsafeUtils.toInts(chunk.getBytes()));
     }
 
     public static NativeObject newNativeInts(final SqueakImageContext img, final ClassObject klass, final int size) {
@@ -93,7 +97,7 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
     }
 
     public static NativeObject newNativeLongs(final SqueakImageChunk chunk) {
-        return new NativeObject(chunk.getImage(), chunk.getHash(), chunk.getSqClass(), ArrayConversionUtils.longsFromBytes(chunk.getBytes()));
+        return new NativeObject(chunk.getImage(), chunk.getHash(), chunk.getSqClass(), UnsafeUtils.toLongs(chunk.getBytes()));
     }
 
     public static NativeObject newNativeLongs(final SqueakImageContext img, final ClassObject klass, final int size) {
@@ -105,7 +109,7 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
     }
 
     public static NativeObject newNativeShorts(final SqueakImageChunk chunk) {
-        return new NativeObject(chunk.getImage(), chunk.getHash(), chunk.getSqClass(), ArrayConversionUtils.shortsFromBytes(chunk.getBytes()));
+        return new NativeObject(chunk.getImage(), chunk.getHash(), chunk.getSqClass(), UnsafeUtils.toShorts(chunk.getBytes()));
     }
 
     public static NativeObject newNativeShorts(final SqueakImageContext img, final ClassObject klass, final int size) {
@@ -130,13 +134,30 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
     }
 
     @Override
+    public int getNumSlots() {
+        CompilerAsserts.neverPartOfCompilation();
+        if (isByteType()) {
+            return (int) Math.ceil((double) getByteLength() / BYTE_TO_WORD);
+        } else if (isShortType()) {
+            return (int) Math.ceil((double) getShortLength() / SHORT_TO_WORD);
+        } else if (isIntType()) {
+            return (int) Math.ceil((double) getIntLength() / INTEGER_TO_WORD);
+        } else if (isLongType()) {
+            return getLongLength();
+        } else {
+            throw SqueakException.create("Unexpected NativeObject");
+        }
+    }
+
+    @Override
     public int instsize() {
         return 0;
     }
 
     @Override
     public int size() {
-        throw SqueakException.create("Use NativeObjectSizeNode");
+        CompilerAsserts.neverPartOfCompilation();
+        return NativeObjectSizeNode.getUncached().execute(this);
     }
 
     public void become(final NativeObject other) {
@@ -155,19 +176,19 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
         setStorage(bytes);
     }
 
-    public void convertToIntsStorage(final byte[] bytes) {
-        assert storage.getClass() != bytes.getClass() : "Converting storage of same type unnecessary";
-        setStorage(ArrayConversionUtils.intsFromBytesReversed(bytes));
+    public void convertToIntsStorage(final int[] ints) {
+        assert storage.getClass() != ints.getClass() : "Converting storage of same type unnecessary";
+        setStorage(ints);
     }
 
-    public void convertToLongsStorage(final byte[] bytes) {
-        assert storage.getClass() != bytes.getClass() : "Converting storage of same type unnecessary";
-        setStorage(ArrayConversionUtils.longsFromBytesReversed(bytes));
+    public void convertToLongsStorage(final long[] longs) {
+        assert storage.getClass() != longs.getClass() : "Converting storage of same type unnecessary";
+        setStorage(longs);
     }
 
-    public void convertToShortsStorage(final byte[] bytes) {
-        assert storage.getClass() != bytes.getClass() : "Converting storage of same type unnecessary";
-        setStorage(ArrayConversionUtils.shortsFromBytesReversed(bytes));
+    public void convertToShortsStorage(final short[] shorts) {
+        assert storage.getClass() != shorts.getClass() : "Converting storage of same type unnecessary";
+        setStorage(shorts);
     }
 
     public byte getByte(final long index) {
@@ -333,6 +354,81 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
         return this == image.doesNotUnderstand;
     }
 
+    public static boolean needsWideString(final String s) {
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) > 255) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public void write(final SqueakImageWriter writerNode) {
+        if (isByteType()) {
+            final int numSlots = getNumSlots();
+            final int formatOffset = numSlots * BYTE_TO_WORD - getByteLength();
+            assert 0 <= formatOffset && formatOffset <= 7 : "too many odd bits (see instSpec)";
+            if (writeHeader(writerNode, formatOffset)) {
+                writerNode.writeBytes(getByteStorage());
+                writePaddingIfAny(writerNode, getByteLength());
+            }
+        } else if (isShortType()) {
+            final int numSlots = getNumSlots();
+            final int formatOffset = numSlots * SHORT_TO_WORD - getShortLength();
+            assert 0 <= formatOffset && formatOffset <= 3 : "too many odd bits (see instSpec)";
+            if (writeHeader(writerNode, formatOffset)) {
+                for (final short value : getShortStorage()) {
+                    writerNode.writeShort(value);
+                }
+                writePaddingIfAny(writerNode, getShortLength() * Short.BYTES);
+            }
+        } else if (isIntType()) {
+            final int numSlots = getNumSlots();
+            final int formatOffset = numSlots * INTEGER_TO_WORD - getIntLength();
+            assert 0 <= formatOffset && formatOffset <= 1 : "too many odd bits (see instSpec)";
+            if (writeHeader(writerNode, formatOffset)) {
+                for (final int value : getIntStorage()) {
+                    writerNode.writeInt(value);
+                }
+                writePaddingIfAny(writerNode, getIntLength() * Integer.BYTES);
+            }
+        } else if (isLongType()) {
+            if (!writeHeader(writerNode)) {
+                return;
+            }
+            for (final long value : getLongStorage()) {
+                writerNode.writeLong(value);
+            }
+            /* Padding not required. */
+        } else {
+            throw SqueakException.create("Unexpected object");
+        }
+    }
+
+    private static void writePaddingIfAny(final SqueakImageWriter writerNode, final int numberOfBytes) {
+        final int offset = numberOfBytes % SqueakImageConstants.WORD_SIZE;
+        if (offset > 0) {
+            writerNode.writePadding(SqueakImageConstants.WORD_SIZE - offset);
+        }
+    }
+
+    public void writeAsFreeList(final SqueakImageWriter writerNode) {
+        if (isLongType()) {
+            /* Write header. */
+            final int numSlots = getLongLength();
+            assert numSlots < SqueakImageConstants.OVERFLOW_SLOTS;
+            /* Free list is of format 9 and pinned. */
+            writerNode.writeLong(SqueakImageConstants.ObjectHeader.getHeader(numSlots, getSqueakHash(), 9, SqueakImageConstants.WORD_SIZE_CLASS_INDEX_PUN, true));
+            /* Write content. */
+            for (final long value : getLongStorage()) {
+                writerNode.writeLong(value);
+            }
+        } else {
+            throw SqueakException.create("Trying to write unexpected hidden native object");
+        }
+    }
+
     /*
      * INTEROPERABILITY
      */
@@ -411,14 +507,5 @@ public final class NativeObject extends AbstractSqueakObjectWithClassAndHash {
             errorProfile.enter();
             throw UnsupportedMessageException.create();
         }
-    }
-
-    public static boolean needsWideString(final String s) {
-        for (int i = 0; i < s.length(); i++) {
-            if (s.charAt(i) > 255) {
-                return true;
-            }
-        }
-        return false;
     }
 }

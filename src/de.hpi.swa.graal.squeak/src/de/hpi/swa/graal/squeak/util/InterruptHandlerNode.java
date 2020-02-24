@@ -20,40 +20,47 @@ public final class InterruptHandlerNode extends Node {
 
     private final Object[] specialObjects;
     private final InterruptHandlerState istate;
+    private final boolean enableTimerInterrupts;
 
-    private final BranchProfile nextWakeupTickProfile = BranchProfile.create();
+    private final BranchProfile nextWakeupTickProfile;
     private final BranchProfile pendingFinalizationSignalsProfile = BranchProfile.create();
     private final BranchProfile hasSemaphoresToSignalProfile = BranchProfile.create();
 
-    protected InterruptHandlerNode(final CompiledCodeObject code) {
+    protected InterruptHandlerNode(final CompiledCodeObject code, final boolean enableTimerInterrupts) {
         specialObjects = code.image.specialObjectsArray.getObjectStorage();
         istate = code.image.interrupt;
         signalSemaporeNode = SignalSemaphoreNode.create(code);
+        this.enableTimerInterrupts = enableTimerInterrupts;
+        nextWakeupTickProfile = enableTimerInterrupts ? BranchProfile.create() : null;
     }
 
-    public static InterruptHandlerNode create(final CompiledCodeObject code) {
-        return new InterruptHandlerNode(code);
+    public static InterruptHandlerNode create(final CompiledCodeObject code, final boolean enableTimerInterrupts) {
+        return new InterruptHandlerNode(code, enableTimerInterrupts);
     }
 
     public void executeTrigger(final VirtualFrame frame) {
         if (istate.interruptPending()) {
             /* Exclude user interrupt case from compilation. */
             CompilerDirectives.transferToInterpreter();
+            LogUtils.INTERRUPTS.fine("User interrupt");
             istate.interruptPending = false; // reset interrupt flag
             signalSemaporeNode.executeSignal(frame, istate.getInterruptSemaphore());
         }
-        if (istate.nextWakeUpTickTrigger()) {
+        if (enableTimerInterrupts && istate.nextWakeUpTickTrigger()) {
             nextWakeupTickProfile.enter();
+            LogUtils.INTERRUPTS.fine("Timer interrupt");
             istate.nextWakeupTick = 0; // reset timer interrupt
             signalSemaporeNode.executeSignal(frame, istate.getTimerSemaphore());
         }
         if (istate.pendingFinalizationSignals()) { // signal any pending finalizations
             pendingFinalizationSignalsProfile.enter();
+            LogUtils.INTERRUPTS.fine("Finalization interrupt");
             istate.setPendingFinalizations(false);
             signalSemaporeNode.executeSignal(frame, specialObjects[SPECIAL_OBJECT.THE_FINALIZATION_SEMAPHORE]);
         }
         if (istate.hasSemaphoresToSignal()) {
             hasSemaphoresToSignalProfile.enter();
+            LogUtils.INTERRUPTS.fine("Semaphore interrupt");
             final ArrayObject externalObjects = (ArrayObject) specialObjects[SPECIAL_OBJECT.EXTERNAL_OBJECTS_ARRAY];
             if (!externalObjects.isEmptyType()) { // signal external semaphores
                 final Object[] semaphores = externalObjects.getObjectStorage();

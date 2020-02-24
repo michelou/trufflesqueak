@@ -8,13 +8,17 @@ package de.hpi.swa.graal.squeak.model;
 import java.lang.ref.WeakReference;
 import java.util.Arrays;
 
+import com.oracle.truffle.api.CompilerAsserts;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
+import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.profiles.ConditionProfile;
 
+import de.hpi.swa.graal.squeak.image.SqueakImageChunk;
 import de.hpi.swa.graal.squeak.image.SqueakImageContext;
-import de.hpi.swa.graal.squeak.image.reading.SqueakImageChunk;
+import de.hpi.swa.graal.squeak.image.SqueakImageWriter;
 import de.hpi.swa.graal.squeak.nodes.ObjectGraphNode.ObjectTracer;
-import de.hpi.swa.graal.squeak.nodes.accessing.AbstractPointersObjectNodes.WeakVariablePointersObjectWriteNode;
+import de.hpi.swa.graal.squeak.nodes.SqueakGuards;
+import de.hpi.swa.graal.squeak.nodes.accessing.AbstractPointersObjectNodes.AbstractPointersObjectWriteNode;
 import de.hpi.swa.graal.squeak.nodes.accessing.SqueakObjectIdentityNode;
 import de.hpi.swa.graal.squeak.nodes.accessing.UpdateSqueakObjectHashNode;
 import de.hpi.swa.graal.squeak.util.UnsafeUtils;
@@ -40,7 +44,7 @@ public final class WeakVariablePointersObject extends AbstractPointersObject {
 
     @Override
     public void fillin(final SqueakImageChunk chunk) {
-        final WeakVariablePointersObjectWriteNode writeNode = WeakVariablePointersObjectWriteNode.getUncached();
+        final AbstractPointersObjectWriteNode writeNode = AbstractPointersObjectWriteNode.getUncached();
         final Object[] pointersObject = chunk.getPointers();
         initializeLayoutAndExtensionsUnsafe();
         final int instSize = getSqueakClass().getBasicInstanceSize();
@@ -49,7 +53,7 @@ public final class WeakVariablePointersObject extends AbstractPointersObject {
         }
         variablePart = new WeakReference<?>[pointersObject.length - instSize];
         for (int i = instSize; i < pointersObject.length; i++) {
-            variablePart[i - instSize] = new WeakReference<>(pointersObject[i], image.weakPointersQueue);
+            putIntoVariablePart(i - instSize, pointersObject[i]);
         }
         assert size() == pointersObject.length;
     }
@@ -99,8 +103,17 @@ public final class WeakVariablePointersObject extends AbstractPointersObject {
         return NilObject.nullToNil(UnsafeUtils.getWeakReference(variablePart, index).get(), nilProfile);
     }
 
-    public void putIntoVariablePart(final int index, final Object value) {
-        UnsafeUtils.putWeakReference(variablePart, index, new WeakReference<>(value, image.weakPointersQueue));
+    private void putIntoVariablePart(final int index, final Object value) {
+        putIntoVariablePart(index, value, BranchProfile.getUncached(), ConditionProfile.getUncached());
+    }
+
+    public void putIntoVariablePart(final int index, final Object value, final BranchProfile nilProfile, final ConditionProfile primitiveProfile) {
+        if (value == NilObject.SINGLETON) {
+            nilProfile.enter();
+            UnsafeUtils.putWeakReference(variablePart, index, NIL_REFERENCE);
+        } else {
+            UnsafeUtils.putWeakReference(variablePart, index, new WeakReference<>(value, primitiveProfile.profile(SqueakGuards.isUsedJavaPrimitive(value)) ? null : image.weakPointersQueue));
+        }
     }
 
     public boolean pointsTo(final SqueakObjectIdentityNode identityNode, final ConditionProfile isPrimitiveProfile, final Object thang) {
@@ -122,5 +135,38 @@ public final class WeakVariablePointersObject extends AbstractPointersObject {
 
     public void traceObjects(final ObjectTracer tracer) {
         super.traceLayoutObjects(tracer);
+        /* Weak pointers excluded from tracing. */
     }
+
+    @Override
+    public void write(final SqueakImageWriter writerNode) {
+        if (super.writeHeaderAndLayoutObjects(writerNode)) {
+            for (int i = 0; i < variablePart.length; i++) {
+                /*
+                 * Since weak pointers are excluded from tracing, ignore (replace with nil) all
+                 * objects that have not been traced somewhere else.
+                 */
+                writerNode.writeObjectIfTracedElseNil(getFromVariablePart(i));
+            }
+        }
+    }
+
+    @Override
+    public String toString() {
+        CompilerAsserts.neverPartOfCompilation();
+        String prefix = "";
+        if (variablePart.length > 0) {
+            final Object referent = variablePart[0].get();
+            prefix = "[" + referent;
+            if (variablePart[0].isEnqueued()) {
+                prefix += " (marked as garbage)";
+            }
+            if (variablePart.length > 1) {
+                prefix += "...";
+            }
+            prefix += "]";
+        }
+        return prefix + " a " + getSqueakClassName() + " @" + Integer.toHexString(hashCode()) + " of size " + variablePart.length;
+    }
+
 }

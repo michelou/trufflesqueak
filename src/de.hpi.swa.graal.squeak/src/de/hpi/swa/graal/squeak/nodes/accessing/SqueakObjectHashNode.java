@@ -5,13 +5,13 @@
  */
 package de.hpi.swa.graal.squeak.nodes.accessing;
 
-import com.oracle.truffle.api.dsl.GenerateUncached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeCost;
 import com.oracle.truffle.api.nodes.NodeInfo;
 
 import de.hpi.swa.graal.squeak.model.ArrayObject;
 import de.hpi.swa.graal.squeak.model.BlockClosureObject;
+import de.hpi.swa.graal.squeak.model.BooleanObject;
 import de.hpi.swa.graal.squeak.model.ClassObject;
 import de.hpi.swa.graal.squeak.model.CompiledBlockObject;
 import de.hpi.swa.graal.squeak.model.CompiledMethodObject;
@@ -26,13 +26,8 @@ import de.hpi.swa.graal.squeak.model.VariablePointersObject;
 import de.hpi.swa.graal.squeak.model.WeakVariablePointersObject;
 import de.hpi.swa.graal.squeak.nodes.AbstractNode;
 
-@GenerateUncached
 @NodeInfo(cost = NodeCost.NONE)
 public abstract class SqueakObjectHashNode extends AbstractNode {
-
-    public static SqueakObjectHashNode create() {
-        return SqueakObjectHashNodeGen.create();
-    }
 
     public abstract long execute(Object obj);
 
@@ -43,12 +38,12 @@ public abstract class SqueakObjectHashNode extends AbstractNode {
 
     @Specialization(guards = "obj == FALSE")
     protected static final long doBooleanFalse(@SuppressWarnings("unused") final boolean obj) {
-        return 2L;
+        return BooleanObject.getFalseSqueakHash();
     }
 
     @Specialization(guards = "obj != FALSE")
     protected static final long doBooleanTrue(@SuppressWarnings("unused") final boolean obj) {
-        return 3L;
+        return BooleanObject.getTrueSqueakHash();
     }
 
     @Specialization
