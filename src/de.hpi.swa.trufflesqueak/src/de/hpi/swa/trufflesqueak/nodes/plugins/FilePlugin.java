@@ -88,13 +88,8 @@ public final class FilePlugin extends AbstractPrimitiveFactoryHolder {
             return asPublicTruffleFile(image, obj.asStringUnsafe());
         }
 
-<<<<<<< HEAD:src/de.hpi.swa.graal.squeak/src/de/hpi/swa/graal/squeak/nodes/plugins/FilePlugin.java
-        protected final TruffleFile asPublicTruffleFile(final String obj) {
-            return method.image.env.getTruffleFile(obj);
-=======
         protected static final TruffleFile asPublicTruffleFile(final SqueakImageContext image, final String obj) {
             return image.env.getPublicTruffleFile(obj);
->>>>>>> upstream/dev:src/de.hpi.swa.trufflesqueak/src/de/hpi/swa/trufflesqueak/nodes/plugins/FilePlugin.java
         }
 
         protected static final boolean inBounds(final long startIndex, final long count, final int slotSize) {
@@ -232,11 +227,7 @@ public final class FilePlugin extends AbstractPrimitiveFactoryHolder {
             final ArrayList<TruffleFile> fileList = new ArrayList<>();
             // TODO: avoid to use Path and FileSystems here.
             for (final Path path : FileSystems.getDefault().getRootDirectories()) {
-<<<<<<< HEAD:src/de.hpi.swa.graal.squeak/src/de/hpi/swa/graal/squeak/nodes/plugins/FilePlugin.java
-                fileList.add(method.image.env.getTruffleFile(path.toUri()));
-=======
                 fileList.add(image.env.getPublicTruffleFile(path.toUri()));
->>>>>>> upstream/dev:src/de.hpi.swa.trufflesqueak/src/de/hpi/swa/trufflesqueak/nodes/plugins/FilePlugin.java
             }
             final int index = (int) longIndex - 1;
             if (index < fileList.size()) {

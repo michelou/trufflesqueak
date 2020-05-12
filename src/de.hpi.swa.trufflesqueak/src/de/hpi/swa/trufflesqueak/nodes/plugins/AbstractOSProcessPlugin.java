@@ -108,11 +108,7 @@ public abstract class AbstractOSProcessPlugin extends AbstractPrimitiveFactoryHo
                         @Cached final BranchProfile errorProfile,
                         @CachedContext(SqueakLanguage.class) final SqueakImageContext image) {
             try {
-<<<<<<< HEAD:src/de.hpi.swa.graal.squeak/src/de/hpi/swa/graal/squeak/nodes/plugins/AbstractOSProcessPlugin.java
-                method.image.env.setCurrentWorkingDirectory(method.image.env.getTruffleFile(pathString.asStringUnsafe()));
-=======
                 image.env.setCurrentWorkingDirectory(image.env.getPublicTruffleFile(pathString.asStringUnsafe()));
->>>>>>> upstream/dev:src/de.hpi.swa.trufflesqueak/src/de/hpi/swa/trufflesqueak/nodes/plugins/AbstractOSProcessPlugin.java
                 return NilObject.SINGLETON; // Signals success.
             } catch (UnsupportedOperationException | IllegalArgumentException | SecurityException e) {
                 errorProfile.enter();

@@ -182,13 +182,8 @@ public final class UnixOSProcessPlugin extends AbstractOSProcessPlugin {
                         @Cached final BranchProfile errorProfile,
                         @CachedContext(SqueakLanguage.class) final SqueakImageContext image) {
             try {
-<<<<<<< HEAD:src/de.hpi.swa.graal.squeak/src/de/hpi/swa/graal/squeak/nodes/plugins/UnixOSProcessPlugin.java
-                final TruffleFile file = method.image.env.getTruffleFile(pathString.asStringUnsafe());
-                return getProtectionMask(file.getPosixPermissions());
-=======
                 final TruffleFile file = image.env.getPublicTruffleFile(pathString.asStringUnsafe());
                 return getProtectionMask(image, file.getPosixPermissions());
->>>>>>> upstream/dev:src/de.hpi.swa.trufflesqueak/src/de/hpi/swa/trufflesqueak/nodes/plugins/UnixOSProcessPlugin.java
             } catch (final IOException | UnsupportedOperationException | SecurityException e) {
                 errorProfile.enter();
                 throw PrimitiveFailed.GENERIC_ERROR;
@@ -204,11 +199,7 @@ public final class UnixOSProcessPlugin extends AbstractOSProcessPlugin {
                         @Cached final BranchProfile errorProfile,
                         @CachedContext(SqueakLanguage.class) final SqueakImageContext image) {
             try {
-<<<<<<< HEAD:src/de.hpi.swa.graal.squeak/src/de/hpi/swa/graal/squeak/nodes/plugins/UnixOSProcessPlugin.java
-                final TruffleFile file = method.image.env.getTruffleFile(pathString.asStringUnsafe());
-=======
                 final TruffleFile file = image.env.getPublicTruffleFile(pathString.asStringUnsafe());
->>>>>>> upstream/dev:src/de.hpi.swa.trufflesqueak/src/de/hpi/swa/trufflesqueak/nodes/plugins/UnixOSProcessPlugin.java
                 final long uid = file.getOwner().hashCode();
                 final long gid = file.getGroup().hashCode();
                 final ArrayObject mask = getProtectionMask(image, file.getPosixPermissions());
@@ -380,11 +371,7 @@ public final class UnixOSProcessPlugin extends AbstractOSProcessPlugin {
                         @Cached final BranchProfile errorProfile,
                         @CachedContext(SqueakLanguage.class) final SqueakImageContext image) {
             try {
-<<<<<<< HEAD:src/de.hpi.swa.graal.squeak/src/de/hpi/swa/graal/squeak/nodes/plugins/UnixOSProcessPlugin.java
-                return method.image.asByteString(method.image.env.getTruffleFile(pathString.asStringUnsafe()).getCanonicalFile().getPath());
-=======
                 return image.asByteString(image.env.getPublicTruffleFile(pathString.asStringUnsafe()).getCanonicalFile().getPath());
->>>>>>> upstream/dev:src/de.hpi.swa.trufflesqueak/src/de/hpi/swa/trufflesqueak/nodes/plugins/UnixOSProcessPlugin.java
             } catch (final IOException e) {
                 errorProfile.enter();
                 throw PrimitiveFailed.GENERIC_ERROR;
